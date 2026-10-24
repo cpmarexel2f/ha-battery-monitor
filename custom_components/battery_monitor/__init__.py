@@ -69,7 +69,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         entries = [e for e in hass.config_entries.async_entries(DOMAIN) if e.state is ConfigEntryState.LOADED]
         if not entries:
             raise ServiceValidationError("Battery Monitor is not loaded")
-        await entries[0].runtime_data.async_notify()
+        await entries[0].runtime_data.async_notify(manual=True)
 
     hass.services.async_register(DOMAIN, SERVICE_NOTIFY, notify)
     return True

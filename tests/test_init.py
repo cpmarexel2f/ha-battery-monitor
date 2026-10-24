@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import AsyncMock, patch
 
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components import persistent_notification
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -223,3 +224,72 @@ async def test_unavailable_keeps_low_since(hass: HomeAssistant, freezer: FrozenD
     await hass.async_block_till_done()
     battery = _batteries(hass)[0]
     assert battery["below_since"] == since and battery["due"]
+
+
+async def test_manual_notify_ignores_duration(hass: HomeAssistant) -> None:
+    calls = async_mock_service(hass, "notify", "mobile_app_phone")
+    add_battery(hass, "Door", "12")
+    add_battery(hass, "Lock", "80")
+    await _setup(hass, **{CONF_NOTIFY: ["notify.mobile_app_phone"]})
+    assert hass.states.get(LOW).attributes["due"] == 0
+
+    await hass.services.async_call("button", "press", {"entity_id": BUTTON}, blocking=True)
+    assert len(calls) == 1
+    assert calls[0].data == {"title": "1 low battery", "message": "• Door: 12 %"}
+    assert _notification(hass)["title"] == "1 low battery"
+
+
+async def test_manual_notify_none_low(hass: HomeAssistant) -> None:
+    calls = async_mock_service(hass, "notify", "mobile_app_phone")
+    add_battery(hass, "Lock", "80")
+    await _setup(hass, **{CONF_NOTIFY: ["notify.mobile_app_phone"]})
+
+    await hass.services.async_call(DOMAIN, "notify", {}, blocking=True)
+    assert calls[0].data == {"title": "No low battery", "message": "Every battery is above 20 %."}
+    assert _notification(hass) is None
+
+
+async def test_low_since_from_history(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    now = dt_util.utcnow()
+    door = add_battery(hass, "Door", "12")
+    smoke = add_battery(hass, "Smoke", "on", domain="binary_sensor")
+    went_low = now - timedelta(days=3)
+    history = {
+        door: [
+            State(door, "40", last_changed=now - timedelta(days=5)),
+            State(door, "unavailable", last_changed=now - timedelta(days=4)),
+            State(door, "35", last_changed=now - timedelta(days=4, hours=-1)),
+            State(door, "18", last_changed=went_low),
+            State(door, "12", last_changed=now - timedelta(days=1)),
+        ],
+        # Low for the whole recorded period
+        smoke: [State(smoke, "on", last_changed=now - timedelta(days=10))],
+    }
+    with patch("custom_components.battery_monitor.monitor._async_history", AsyncMock(return_value=history)):
+        await _setup(hass)
+
+    batteries = {b["name"]: b for b in _batteries(hass)}
+    assert batteries["Door"]["below_since"] == went_low.isoformat()
+    assert batteries["Door"]["due"]
+    assert batteries["Smoke"]["below_since"] == (now - timedelta(days=10)).isoformat()
+
+
+async def test_low_since_from_real_recorder(recorder_mock, hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    from pytest_homeassistant_custom_component.components.recorder.common import async_wait_recording_done
+
+    start = dt_util.utcnow()
+    door = add_battery(hass, "Door", "45")
+    await async_wait_recording_done(hass)
+    freezer.tick(timedelta(hours=10))
+    attrs = {"device_class": "battery", "unit_of_measurement": "%"}
+    hass.states.async_set(door, "19", attrs)
+    await async_wait_recording_done(hass)
+    went_low = start + timedelta(hours=10)
+    freezer.tick(timedelta(hours=30))
+    hass.states.async_set(door, "15", attrs)
+    await async_wait_recording_done(hass)
+
+    await _setup(hass)
+    battery = _batteries(hass)[0]
+    assert dt_util.parse_datetime(battery["below_since"]) == went_low
+    assert battery["due"]

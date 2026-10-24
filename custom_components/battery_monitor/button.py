@@ -19,7 +19,7 @@ async def async_setup_entry(
 
 
 class NotifyNowButton(BatteryMonitorEntity, ButtonEntity):
-    """Same notification as the scheduled ones, right away."""
+    """Every low battery right away, whatever the duration."""
 
     async def async_press(self) -> None:
-        await self.monitor.async_notify()
+        await self.monitor.async_notify(manual=True)

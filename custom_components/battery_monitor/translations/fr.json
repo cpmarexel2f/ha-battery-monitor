@@ -91,7 +91,7 @@
   "services": {
     "notify": {
       "name": "Notifier les batteries faibles",
-      "description": "Envoie maintenant la notification des batteries faibles, avec celles restées faibles pendant la durée configurée."
+      "description": "Envoie maintenant la notification des batteries faibles, avec toutes celles sous le seuil quelle que soit la durée, ou un message indiquant qu'aucune n'est faible."
     }
   },
   "exceptions": {
@@ -106,6 +106,12 @@
     },
     "line_no_level": {
       "message": "• {name}{area} : faible"
+    },
+    "none_title": {
+      "message": "Aucune batterie faible"
+    },
+    "none": {
+      "message": "Toutes les batteries sont au-dessus de {threshold} %."
     }
   }
 }

@@ -12,6 +12,8 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import partial
+from itertools import pairwise
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -24,7 +26,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, NOTIFICATION_ID, STORAGE_KEY, STORAGE_VERSION
+from .const import DOMAIN, MAX_DURATION, NOTIFICATION_ID, STORAGE_KEY, STORAGE_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -80,6 +82,24 @@ def _level(state: State) -> int | None:
         return None
 
 
+async def _async_history(hass: HomeAssistant, entity_ids: list[str], start: datetime) -> dict[str, list[State]]:
+    """Recorded states of `entity_ids` since `start`, oldest first ({} without the recorder)."""
+    if "recorder" not in hass.config.components:
+        return {}
+    from homeassistant.components.recorder import get_instance, history  # noqa: PLC0415 - optional dependency
+
+    return await get_instance(hass).async_add_executor_job(
+        partial(
+            history.get_significant_states,
+            hass,
+            start,
+            entity_ids=entity_ids,
+            significant_changes_only=False,
+            no_attributes=True,
+        )
+    )
+
+
 class BatteryMonitor:
     """Battery list, low-battery tracking and notifications."""
 
@@ -129,6 +149,42 @@ class BatteryMonitor:
         stored = await self._store.async_load() or {}
         for entity_id, value in stored.items():
             if (since := dt_util.parse_datetime(value)) is not None:
+                self._below_since[entity_id] = since
+        known = set(self._below_since)
+        self.async_refresh()
+        # Batteries already low when first seen (just installed, or newly found): look up in the
+        # history when they went low, rather than starting the count now.
+        new = [b.entity_id for b in self.low if b.entity_id not in known]
+        if new:
+            try:
+                await self._async_backfill(new)
+            except Exception:  # noqa: BLE001 - the history only makes the start time more accurate
+                _LOGGER.exception("Could not read the history of the low batteries")
+
+    def _is_low(self, state: State) -> bool | None:
+        """True / False for a battery state, None when unavailable."""
+        if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        # Recorded states (LazyState) have no `domain`: read it from the entity ID.
+        if state.entity_id.startswith("binary_sensor."):
+            return state.state == "on"
+        level = _level(state)
+        return None if level is None else level < self.threshold
+
+    async def _async_backfill(self, entity_ids: list[str]) -> None:
+        """Set when each battery went low: right after its last state above the threshold."""
+        now = dt_util.utcnow()
+        states = await _async_history(self.hass, entity_ids, now - timedelta(hours=MAX_DURATION))
+        for entity_id in entity_ids:
+            recorded = [s for s in states.get(entity_id, []) if self._is_low(s) is not None]
+            if not recorded:
+                continue
+            # Low for the whole recorded period, or since the last time it went below the threshold.
+            since = recorded[0].last_changed if self._is_low(recorded[0]) else None
+            for previous, state in pairwise(recorded):
+                if not self._is_low(previous) and self._is_low(state):
+                    since = state.last_changed
+            if since is not None and since < self._below_since.get(entity_id, now):
                 self._below_since[entity_id] = since
         self.async_refresh()
 
@@ -221,14 +277,22 @@ class BatteryMonitor:
 
     # ── Notifications ───────────────────────────────────────────────────────
 
-    async def async_notify(self) -> None:
-        """Notify the batteries that have been low for the duration; clear the notification when none is."""
+    async def async_notify(self, manual: bool = False) -> None:
+        """Notify the batteries that have been low for the duration; clear the notification when none is.
+
+        Asked for (button, action): every low battery, whatever the duration, and a message even
+        when none is low, so the person who asked gets an answer.
+        """
         self.async_refresh()
-        due = self.due
+        due = [b for b in self.low if not b.unavailable] if manual else self.due
         self.last_notification = dt_util.utcnow()
         self.last_notified = len(due)
         if not due:
             persistent_notification.async_dismiss(self.hass, NOTIFICATION_ID)
+            if manual:
+                await self._async_send(
+                    await self._text("none_title"), await self._text("none", threshold=self.threshold), persistent=False
+                )
             self._notify_listeners()
             return
 
@@ -248,8 +312,17 @@ class BatteryMonitor:
             for b in due
         ]
         title = text("title_one" if len(due) == 1 else "title_many", count=len(due))
-        message = "\n".join(lines)
-        persistent_notification.async_create(self.hass, message, title=title, notification_id=NOTIFICATION_ID)
+        await self._async_send(title, "\n".join(lines))
+        self._notify_listeners()
+
+    async def _text(self, key: str, **values: Any) -> str:
+        strings = await async_get_translations(self.hass, self.hass.config.language, "exceptions", [DOMAIN])
+        return strings.get(f"component.{DOMAIN}.exceptions.{key}.message", key).format(**values)
+
+    async def _async_send(self, title: str, message: str, *, persistent: bool = True) -> None:
+        """Persistent notification (replaced each time), and the notify actions chosen."""
+        if persistent:
+            persistent_notification.async_create(self.hass, message, title=title, notification_id=NOTIFICATION_ID)
         for service in self.notify_services:
             name = service.removeprefix("notify.")
             if not self.hass.services.has_service("notify", name):
@@ -259,4 +332,3 @@ class BatteryMonitor:
                 await self.hass.services.async_call("notify", name, {"title": title, "message": message}, blocking=True)
             except Exception:  # noqa: BLE001 - a broken notifier must not stop the others
                 _LOGGER.exception("Sending the notification with notify.%s failed", name)
-        self._notify_listeners()

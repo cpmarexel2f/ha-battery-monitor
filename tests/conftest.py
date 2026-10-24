@@ -10,8 +10,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 
 @pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(enable_custom_integrations):
-    """Load custom_components/ in every test."""
+def auto_enable_custom_integrations(request: pytest.FixtureRequest):
+    """Load custom_components/ in every test (after the recorder, for the tests that use it)."""
+    if "recorder_mock" in request.fixturenames:
+        request.getfixturevalue("recorder_mock")
+    request.getfixturevalue("enable_custom_integrations")
     yield
 
 

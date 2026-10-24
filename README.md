@@ -95,11 +95,11 @@ When no battery is due, nothing is sent and the persistent notification is clear
 |---|---|
 | `sensor.battery_monitor_low_batteries` | Number of batteries below the threshold. Attributes: `due` (number low for the duration), `threshold`, `duration` (h), `batteries` (every monitored battery: `entity_id`, `device_id`, `name`, `area`, `level`, `icon`, `low`, `due`, `unavailable`, `below_since`) |
 | `sensor.battery_monitor_last_notification` | Time of the last notification; attribute `notified` (number of batteries notified) |
-| `button.battery_monitor_notify_now` | Sends the notification right away |
+| `button.battery_monitor_notify_now` | Sends every low battery right away, whatever the duration (or *No low battery*) |
 
 ### Action `battery_monitor.notify`
 
-Sends the notification right away, like the scheduled ones, for example from an automation when you leave on holiday:
+Sends every battery below the threshold right away, whatever the duration, or a *No low battery* message when none is low (the scheduled notifications only list the batteries low for the duration). For example from an automation when you leave on holiday:
 
 ```yaml
 action: battery_monitor.notify
@@ -136,7 +136,7 @@ Tap a battery to open its details.
 
 A battery is a `sensor` with the `battery` device class (its level in %) or a `binary_sensor` with the `battery` device class (`on` means low). When a device has both, its level sensor is used. Hidden entities, the ignored batteries and the batteries of the ignored integrations are left out.
 
-When a battery goes below the threshold, Battery Monitor writes down the time. It is kept while the battery is unavailable (a dead battery often makes its device unavailable) and across restarts, and forgotten once the battery is back above the threshold (replaced or recharged). A battery is notified once that time is older than the duration.
+When a battery goes below the threshold, Battery Monitor writes down the time. For a battery that is already low when it is first seen (right after installing Battery Monitor, say), that time is read from the history, up to 30 days back. It is kept while the battery is unavailable (a dead battery often makes its device unavailable) and across restarts, and forgotten once the battery is back above the threshold (replaced or recharged). A battery is notified once that time is older than the duration.
 
 The list is updated whenever a battery changes, and every 10 minutes.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+### Fixes
+- Batteries already low when Battery Monitor is installed (or found later) are no longer counted as low "since now": the time they went below the threshold is read from the history (up to 30 days), so they are notified at the next notification time when they have been low long enough, instead of after a full duration.
+- **Notify now** and the `battery_monitor.notify` action send every low battery right away, whatever the duration, and a "No low battery" message when none is low: before, they sent nothing until a battery had been low for the whole duration, which looked broken. The scheduled notifications are unchanged.
+
 ## 1.0.0
 
 First public release.

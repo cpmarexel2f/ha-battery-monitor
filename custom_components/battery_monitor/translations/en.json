@@ -91,7 +91,7 @@
   "services": {
     "notify": {
       "name": "Notify low batteries",
-      "description": "Sends the low-battery notification now, with the batteries that have been low for the configured duration."
+      "description": "Sends the low-battery notification now, with every battery below the threshold whatever the duration, or a message saying none is low."
     }
   },
   "exceptions": {
@@ -106,6 +106,12 @@
     },
     "line_no_level": {
       "message": "• {name}{area}: low"
+    },
+    "none_title": {
+      "message": "No low battery"
+    },
+    "none": {
+      "message": "Every battery is above {threshold} %."
     }
   }
 }

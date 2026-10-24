@@ -1,6 +1,7 @@
 {
   "domain": "battery_monitor",
   "name": "Battery Monitor",
+  "after_dependencies": ["recorder"],
   "codeowners": ["@juju35"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "lovelace", "persistent_notification"],
@@ -10,5 +11,5 @@
   "issue_tracker": "https://github.com/juju35/ha-battery-monitor/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "1.0.0"
+  "version": "1.0.1"
 }
