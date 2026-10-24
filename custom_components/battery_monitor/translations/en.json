@@ -1,0 +1,111 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Battery Monitor",
+        "description": "Notifies twice a day the devices whose battery has stayed low.",
+        "data": {
+          "threshold": "Low battery threshold",
+          "duration": "Low for at least",
+          "morning_time": "Morning notification",
+          "evening_time": "Evening notification",
+          "notify_services": "Notify actions",
+          "ignored_entities": "Ignored batteries",
+          "ignored_integrations": "Ignored integrations"
+        },
+        "data_description": {
+          "threshold": "A battery is low below this level.",
+          "duration": "Hours a battery must have stayed below the threshold before it is notified (0: at the next notification).",
+          "morning_time": "First of the two daily notifications.",
+          "evening_time": "Second of the two daily notifications.",
+          "notify_services": "Send the notifications with these actions (notify.mobile_app_…). A persistent notification is always created.",
+          "ignored_entities": "Batteries never monitored.",
+          "ignored_integrations": "Integrations whose batteries are never monitored (phones and tablets of the mobile app by default). Type a domain to add one that isn't set up yet."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Battery Monitor is already configured.",
+      "single_instance_allowed": "Battery Monitor is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Battery Monitor options",
+        "data": {
+          "threshold": "Low battery threshold",
+          "duration": "Low for at least",
+          "morning_time": "Morning notification",
+          "evening_time": "Evening notification",
+          "notify_services": "Notify actions",
+          "ignored_entities": "Ignored batteries",
+          "ignored_integrations": "Ignored integrations"
+        },
+        "data_description": {
+          "threshold": "A battery is low below this level.",
+          "duration": "Hours a battery must have stayed below the threshold before it is notified (0: at the next notification).",
+          "morning_time": "First of the two daily notifications.",
+          "evening_time": "Second of the two daily notifications.",
+          "notify_services": "Send the notifications with these actions (notify.mobile_app_…). A persistent notification is always created.",
+          "ignored_entities": "Batteries never monitored.",
+          "ignored_integrations": "Integrations whose batteries are never monitored (phones and tablets of the mobile app by default). Type a domain to add one that isn't set up yet."
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "notify_now": {
+        "name": "Notify now"
+      }
+    },
+    "sensor": {
+      "low_batteries": {
+        "name": "Low batteries",
+        "state_attributes": {
+          "due": {
+            "name": "Due"
+          },
+          "threshold": {
+            "name": "Threshold"
+          },
+          "duration": {
+            "name": "Duration"
+          },
+          "batteries": {
+            "name": "Batteries"
+          }
+        }
+      },
+      "last_notification": {
+        "name": "Last notification",
+        "state_attributes": {
+          "notified": {
+            "name": "Batteries notified"
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "notify": {
+      "name": "Notify low batteries",
+      "description": "Sends the low-battery notification now, with the batteries that have been low for the configured duration."
+    }
+  },
+  "exceptions": {
+    "title_one": {
+      "message": "1 low battery"
+    },
+    "title_many": {
+      "message": "{count} low batteries"
+    },
+    "line": {
+      "message": "• {name}{area}: {level} %"
+    },
+    "line_no_level": {
+      "message": "• {name}{area}: low"
+    }
+  }
+}

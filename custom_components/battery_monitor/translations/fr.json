@@ -1,0 +1,111 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Battery Monitor",
+        "description": "Notifie deux fois par jour les appareils dont la batterie est restée faible.",
+        "data": {
+          "threshold": "Seuil de batterie faible",
+          "duration": "Faible depuis au moins",
+          "morning_time": "Notification du matin",
+          "evening_time": "Notification du soir",
+          "notify_services": "Actions de notification",
+          "ignored_entities": "Batteries ignorées",
+          "ignored_integrations": "Intégrations ignorées"
+        },
+        "data_description": {
+          "threshold": "Une batterie est faible sous ce niveau.",
+          "duration": "Heures pendant lesquelles une batterie doit rester sous le seuil avant d'être notifiée (0 : dès la prochaine notification).",
+          "morning_time": "Première des deux notifications quotidiennes.",
+          "evening_time": "Seconde des deux notifications quotidiennes.",
+          "notify_services": "Envoyer les notifications avec ces actions (notify.mobile_app_…). Une notification persistante est toujours créée.",
+          "ignored_entities": "Batteries jamais surveillées.",
+          "ignored_integrations": "Intégrations dont les batteries ne sont jamais surveillées (téléphones et tablettes de l'application mobile par défaut). Saisissez un domaine pour en ajouter une qui n'est pas encore configurée."
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Battery Monitor est déjà configuré.",
+      "single_instance_allowed": "Battery Monitor est déjà configuré."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options de Battery Monitor",
+        "data": {
+          "threshold": "Seuil de batterie faible",
+          "duration": "Faible depuis au moins",
+          "morning_time": "Notification du matin",
+          "evening_time": "Notification du soir",
+          "notify_services": "Actions de notification",
+          "ignored_entities": "Batteries ignorées",
+          "ignored_integrations": "Intégrations ignorées"
+        },
+        "data_description": {
+          "threshold": "Une batterie est faible sous ce niveau.",
+          "duration": "Heures pendant lesquelles une batterie doit rester sous le seuil avant d'être notifiée (0 : dès la prochaine notification).",
+          "morning_time": "Première des deux notifications quotidiennes.",
+          "evening_time": "Seconde des deux notifications quotidiennes.",
+          "notify_services": "Envoyer les notifications avec ces actions (notify.mobile_app_…). Une notification persistante est toujours créée.",
+          "ignored_entities": "Batteries jamais surveillées.",
+          "ignored_integrations": "Intégrations dont les batteries ne sont jamais surveillées (téléphones et tablettes de l'application mobile par défaut). Saisissez un domaine pour en ajouter une qui n'est pas encore configurée."
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "notify_now": {
+        "name": "Notifier maintenant"
+      }
+    },
+    "sensor": {
+      "low_batteries": {
+        "name": "Batteries faibles",
+        "state_attributes": {
+          "due": {
+            "name": "À notifier"
+          },
+          "threshold": {
+            "name": "Seuil"
+          },
+          "duration": {
+            "name": "Durée"
+          },
+          "batteries": {
+            "name": "Batteries"
+          }
+        }
+      },
+      "last_notification": {
+        "name": "Dernière notification",
+        "state_attributes": {
+          "notified": {
+            "name": "Batteries notifiées"
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "notify": {
+      "name": "Notifier les batteries faibles",
+      "description": "Envoie maintenant la notification des batteries faibles, avec celles restées faibles pendant la durée configurée."
+    }
+  },
+  "exceptions": {
+    "title_one": {
+      "message": "1 batterie faible"
+    },
+    "title_many": {
+      "message": "{count} batteries faibles"
+    },
+    "line": {
+      "message": "• {name}{area} : {level} %"
+    },
+    "line_no_level": {
+      "message": "• {name}{area} : faible"
+    }
+  }
+}

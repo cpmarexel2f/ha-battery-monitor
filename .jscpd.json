@@ -1,0 +1,8 @@
+{
+  "minTokens": 50,
+  "threshold": 6,
+  "absolute": false,
+  "gitignore": true,
+  "ignore": ["**/dist/**", "**/vendor/**", "**/node_modules/**", "**/tests/**", "**/.git/**", "**/*.min.js"],
+  "reporters": ["console"]
+}

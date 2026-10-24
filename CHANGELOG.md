@@ -1,0 +1,12 @@
+# Changelog
+
+## 1.0.0
+
+First public release.
+
+### What's new
+- Battery Monitor integration: finds every battery (`sensor` and `binary_sensor` with the `battery` device class), one per device, and tracks how long each one has been below the threshold, across restarts.
+- Notifications twice a day (09:00 and 19:00 by default) of the batteries that have stayed below the threshold (20 % by default) for the configured duration (24 h by default): a persistent notification, replaced each time and cleared when no battery is low any more, and the notify actions of your choice (mobile app…).
+- Options: threshold, duration, the two notification times, notify actions, batteries and integrations to leave out (phones and tablets of the mobile app by default).
+- **Low batteries** sensor with every monitored battery in its attributes, **Last notification** sensor, **Notify now** button and `battery_monitor.notify` action.
+- Battery Monitor card, bundled with the integration and added to the dashboard resources automatically: every battery with its icon, name, room and level, the lowest first; red and blinking once notified, orange while low, how long it has been low; "Notify now" button; visual editor, English and French.

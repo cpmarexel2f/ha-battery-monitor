@@ -1,0 +1,17 @@
+{
+  "entity": {
+    "button": {
+      "notify_now": { "default": "mdi:bell-ring-outline" }
+    },
+    "sensor": {
+      "low_batteries": {
+        "default": "mdi:battery-alert-variant-outline",
+        "state": { "0": "mdi:battery-check-outline" }
+      },
+      "last_notification": { "default": "mdi:bell-check-outline" }
+    }
+  },
+  "services": {
+    "notify": { "service": "mdi:bell-ring-outline" }
+  }
+}
