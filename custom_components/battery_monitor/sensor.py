@@ -40,6 +40,7 @@ class LowBatteriesSensor(BatteryMonitorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
+            "unavailable": len(self.monitor.unavailable),
             "due": len(self.monitor.due),
             "threshold": self.monitor.threshold,
             "duration": self.monitor.duration.total_seconds() / 3600,

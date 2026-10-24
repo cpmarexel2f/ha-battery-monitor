@@ -27,6 +27,7 @@ It comes with a **Lovelace card** listing every battery with its icon, name, roo
 
 - **Automatic discovery** of every battery: `sensor` (level in %) and `binary_sensor` (low / normal) with the `battery` device class, one per device
 - **Threshold** (20 % by default) and **duration** (24 hours by default): a battery is notified once it has stayed below the threshold for that long, even across restarts
+- **Unavailable batteries** reported too: a device whose battery is `unavailable` or `unknown` for the duration (often a dead battery) is notified like a low one
 - **Two notifications a day**, at times you choose (09:00 and 19:00 by default), listing the low batteries with their room and level
 - **Persistent notification**, replaced each time and cleared when no battery is low any more, and the **notify actions** of your choice (mobile app…)
 - **Ignored batteries and integrations**: phones and tablets of the mobile app are left out by default
@@ -87,13 +88,15 @@ At each notification time, the batteries that have been below the threshold for 
 • Smoke detector (Hallway): low
 ```
 
+As soon as one of them is unavailable, the title becomes *N batteries to check* and its line says *unavailable*.
+
 When no battery is due, nothing is sent and the persistent notification is cleared.
 
 ### Entities
 
 | Entity | Description |
 |---|---|
-| `sensor.battery_monitor_low_batteries` | Number of batteries below the threshold. Attributes: `due` (number low for the duration), `threshold`, `duration` (h), `batteries` (every monitored battery: `entity_id`, `device_id`, `name`, `area`, `level`, `icon`, `low`, `due`, `unavailable`, `below_since`) |
+| `sensor.battery_monitor_low_batteries` | Number of batteries below the threshold. Attributes: `unavailable` (number of unavailable batteries), `due` (number needing attention for the duration), `threshold`, `duration` (h), `batteries` (every monitored battery: `entity_id`, `device_id`, `name`, `area`, `level`, `icon`, `low`, `alert` (low or unavailable), `due`, `unavailable`, `below_since`) |
 | `sensor.battery_monitor_last_notification` | Time of the last notification; attribute `notified` (number of batteries notified) |
 | `button.battery_monitor_notify_now` | Sends every low battery right away, whatever the duration (or *No low battery*) |
 
@@ -118,8 +121,8 @@ type: custom:battery-monitor-card
 | `entity` | Auto | The **Low batteries** sensor; found automatically |
 | `title` | `Batteries` | Card title |
 | `columns` | `1` | Number of battery columns (1–3) |
-| `only_low` | `false` | Show only the batteries below the threshold (and unavailable ones) |
-| `hide_when_ok` | `false` | Hide the whole card when no battery is low |
+| `only_low` | `false` | Show only the batteries below the threshold or unavailable |
+| `hide_when_ok` | `false` | Hide the whole card when every battery is above the threshold and available |
 | `notify_button` | `true` | Bell button in the header that sends the notification now |
 | `language` | Auto | Force language: `fr` or `en` |
 

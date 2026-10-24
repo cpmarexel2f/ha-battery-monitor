@@ -86,7 +86,7 @@ customElements.define("ha-icon", class extends HTMLElement {
 });"""
 )
 
-# Mock batteries, already sorted the way the integration sends them (low first, lowest first).
+# Mock batteries, already sorted the way the integration sends them (low first, lowest first, then unavailable).
 # (name en, name fr, area en, area fr, level, icon, low, due, unavailable, below_since)
 BATTERIES = [
     (
@@ -125,10 +125,21 @@ BATTERIES = [
         False,
         "2026-10-22T18:00:00+02:00",
     ),
+    (
+        "Motion sensor",
+        "Détecteur de mouvement",
+        "Garage",
+        "Garage",
+        None,
+        "battery-unknown",
+        False,
+        True,
+        True,
+        "2026-10-22T21:00:00+02:00",
+    ),
     ("Remote", "Télécommande", "Living room", "Séjour", 34, "battery-30", False, False, False, None),
     ("Smart lock", "Serrure", "Entrance", "Entrée", 64, "battery-60", False, False, False, None),
     ("Thermostat", "Thermostat", "Bedroom", "Chambre", 92, "battery-90", False, False, False, None),
-    ("Motion sensor", "Détecteur de mouvement", "Garage", "Garage", None, "battery-unknown", False, False, True, None),
 ]
 
 
@@ -143,6 +154,7 @@ def mock_hass(lang):
             "level": level,
             "icon": f"mdi:{icon}",
             "low": low,
+            "alert": low or unavailable,
             "due": due,
             "unavailable": unavailable,
             "below_since": since,
@@ -156,7 +168,7 @@ def mock_hass(lang):
             sensor: {
                 "entity_id": sensor,
                 "state": "3",
-                "attributes": {"threshold": 20, "due": 2, "batteries": batteries},
+                "attributes": {"threshold": 20, "unavailable": 1, "due": 3, "batteries": batteries},
             },
             button: {"entity_id": button, "state": "unknown", "attributes": {}},
         },

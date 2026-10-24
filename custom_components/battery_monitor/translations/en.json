@@ -64,6 +64,9 @@
       "low_batteries": {
         "name": "Low batteries",
         "state_attributes": {
+          "unavailable": {
+            "name": "Unavailable"
+          },
           "due": {
             "name": "Due"
           },
@@ -91,7 +94,7 @@
   "services": {
     "notify": {
       "name": "Notify low batteries",
-      "description": "Sends the low-battery notification now, with every battery below the threshold whatever the duration, or a message saying none is low."
+      "description": "Sends the notification now, with every battery below the threshold or unavailable whatever the duration, or a message saying none needs attention."
     }
   },
   "exceptions": {
@@ -108,10 +111,19 @@
       "message": "• {name}{area}: low"
     },
     "none_title": {
-      "message": "No low battery"
+      "message": "No battery to check"
     },
     "none": {
-      "message": "Every battery is above {threshold} %."
+      "message": "Every battery is above {threshold} % and available."
+    },
+    "line_unavailable": {
+      "message": "• {name}{area}: unavailable"
+    },
+    "check_one": {
+      "message": "1 battery to check"
+    },
+    "check_many": {
+      "message": "{count} batteries to check"
     }
   }
 }

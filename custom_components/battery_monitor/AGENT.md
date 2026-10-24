@@ -19,11 +19,11 @@ custom_components/battery_monitor/
 
 ## Rules
 - A battery is a `sensor` (level %) or `binary_sensor` (`on` = low) with device class `battery`. One per device: the level sensor wins over the binary sensor. Hidden entities, `ignored_entities` and entities of `ignored_integrations` (default `mobile_app`) are left out.
-- *Low*: level < threshold, or binary `on`. `below_since` is set when a battery becomes low, kept while it is unavailable (often a dead battery), cleared when it is back above the threshold. Persisted in `.storage/battery_monitor.below_since` (delayed save, immediate save on unload so a reload never resets it).
+- *Low*: level < threshold, or binary `on`. *Alert* = low or unavailable (`unavailable` / `unknown`, often a dead battery). `below_since` is set when a battery becomes an alert (low then unavailable keeps the low time), cleared when it is available and above the threshold. Persisted in `.storage/battery_monitor.below_since` (delayed save, immediate save on unload so a reload never resets it).
 - A battery already low when first seen (not in the store): `below_since` is read from the recorder history (up to `MAX_DURATION` h): right after its last state above the threshold, or its first recorded state when low all along. Recorded states are `LazyState` (no `.domain`): read the domain from the entity ID.
-- *Due*: low for at least `duration` hours. Only due batteries are notified on schedule; the button and the action (`manual=True`) send every low battery, or a *none* message.
+- *Due*: alert for at least `duration` hours. Only due batteries are notified on schedule; the button and the action (`manual=True`) send every alert, or a *none* message. Title *low batteries*, or *batteries to check* when one is unavailable.
 - Notifications at `morning_time` and `evening_time` (local time), from the button and from the `battery_monitor.notify` action: persistent notification id `battery_monitor_low` (replaced; dismissed when nothing is due) + each `notify.*` action. Texts in translations `exceptions.*` (rendered with `str.format`). A failing notifier is logged and doesn't stop the others.
-- The list is rebuilt on every battery state change and every 10 minutes (durations move on without state changes). Sorted low first, lowest level first.
+- The list is rebuilt on every battery state change and every 10 minutes (durations move on without state changes). Sorted alerts first: lowest level, low binary sensors, then unavailable.
 - The card is served at `/battery_monitor/battery-monitor-card.js` and added to the dashboard resources (storage mode) or loaded with `add_extra_js_url` (YAML mode); removed with the entry.
 
 ## Release

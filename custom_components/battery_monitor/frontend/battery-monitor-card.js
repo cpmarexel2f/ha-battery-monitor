@@ -4,7 +4,7 @@
  * Served and added to the dashboard resources by the integration.
  * https://github.com/juju35/ha-battery-monitor
  */
-var BATTERY_MONITOR_CARD_VERSION = '1.0.1';
+var BATTERY_MONITOR_CARD_VERSION = '1.1.0';
 
 const BM_I18N = {
   en: {
@@ -12,12 +12,15 @@ const BM_I18N = {
     all_ok: 'All good',
     low_one: '{n} low',
     low_many: '{n} low',
+    unavailable_one: '{n} unavailable',
+    unavailable_many: '{n} unavailable',
     no_batteries: 'No battery found',
     not_loaded: 'Battery Monitor is not set up',
     low: 'Low',
     unavailable: 'Unavailable',
     notify_now: 'Notify now',
     since: 'low for {d}',
+    since_unavailable: 'unavailable for {d}',
     hours: '{n} h',
     days: '{n} d',
     ed_entity: 'Battery Monitor sensor',
@@ -26,9 +29,9 @@ const BM_I18N = {
     ed_title_helper: 'Leave empty for “Batteries”',
     ed_columns: 'Columns',
     ed_only_low: 'Hide the batteries that are fine',
-    ed_only_low_helper: 'Only the batteries below the threshold stay visible',
-    ed_hide_when_ok: 'Hide the card when no battery is low',
-    ed_hide_when_ok_helper: 'The card only appears when a battery is below the threshold',
+    ed_only_low_helper: 'Only the batteries below the threshold or unavailable stay visible',
+    ed_hide_when_ok: 'Hide the card when every battery is fine',
+    ed_hide_when_ok_helper: 'The card only appears when a battery is below the threshold or unavailable',
     ed_notify_button: '“Notify now” button',
     ed_notify_button_helper: 'Sends the low-battery notification from the header',
   },
@@ -37,12 +40,15 @@ const BM_I18N = {
     all_ok: 'Tout est bon',
     low_one: '{n} faible',
     low_many: '{n} faibles',
+    unavailable_one: '{n} indisponible',
+    unavailable_many: '{n} indisponibles',
     no_batteries: 'Aucune batterie trouvée',
     not_loaded: 'Battery Monitor n’est pas configuré',
     low: 'Faible',
     unavailable: 'Indisponible',
     notify_now: 'Notifier maintenant',
     since: 'faible depuis {d}',
+    since_unavailable: 'indisponible depuis {d}',
     hours: '{n} h',
     days: '{n} j',
     ed_entity: 'Capteur Battery Monitor',
@@ -51,9 +57,9 @@ const BM_I18N = {
     ed_title_helper: 'Laisser vide pour « Batteries »',
     ed_columns: 'Colonnes',
     ed_only_low: 'Masquer les batteries en bon état',
-    ed_only_low_helper: 'Seules les batteries sous le seuil restent affichées',
-    ed_hide_when_ok: 'Masquer la carte si aucune batterie n’est faible',
-    ed_hide_when_ok_helper: 'La carte n’apparaît que si une batterie est sous le seuil',
+    ed_only_low_helper: 'Seules les batteries sous le seuil ou indisponibles restent affichées',
+    ed_hide_when_ok: 'Masquer la carte si toutes les batteries vont bien',
+    ed_hide_when_ok_helper: 'La carte n’apparaît que si une batterie est sous le seuil ou indisponible',
     ed_notify_button: 'Bouton « Notifier maintenant »',
     ed_notify_button_helper: 'Envoie la notification des batteries faibles depuis l’en-tête',
   },
@@ -114,9 +120,9 @@ class BatteryMonitorCard extends HTMLElement {
     return bmT(bmLang(this._hass, this._config), key, vars);
   }
 
-  _since(iso) {
+  _since(iso, key) {
     const h = Math.max(0, (Date.now() - new Date(iso).getTime()) / 3600000);
-    return this._t('since', { d: h < 48 ? this._t('hours', { n: Math.floor(h) }) : this._t('days', { n: Math.floor(h / 24) }) });
+    return this._t(key, { d: h < 48 ? this._t('hours', { n: Math.floor(h) }) : this._t('days', { n: Math.floor(h / 24) }) });
   }
 
   _render() {
@@ -126,7 +132,9 @@ class BatteryMonitorCard extends HTMLElement {
     const st = entity && this._hass.states[entity];
     const all = st?.attributes.batteries || [];
     const low = all.filter((b) => b.low);
-    const due = low.filter((b) => b.due);
+    const unavailable = all.filter((b) => b.unavailable);
+    const attention = low.length + unavailable.length;
+    const due = all.filter((b) => b.due);
     const shown = c.only_low ? all.filter((b) => b.low || b.unavailable) : all;
     this._shown = shown.length;
     // The button of the same device, to notify now.
@@ -139,23 +147,31 @@ class BatteryMonitorCard extends HTMLElement {
     if (sig === this._sig) return;
     this._sig = sig;
 
-    const hidden = c.hide_when_ok && st && !low.length;
+    const hidden = c.hide_when_ok && st && !attention;
     this.style.display = hidden ? 'none' : '';
     if (hidden) return;
 
-    const level = due.length ? 'alert' : low.length ? 'warn' : 'ok';
+    const level = due.length ? 'alert' : attention ? 'warn' : 'ok';
+    const counts = [
+      low.length ? this._t(low.length > 1 ? 'low_many' : 'low_one', { n: low.length }) : '',
+      unavailable.length
+        ? this._t(unavailable.length > 1 ? 'unavailable_many' : 'unavailable_one', { n: unavailable.length })
+        : '',
+    ].filter(Boolean);
     const status = !st
       ? this._t('not_loaded')
-      : low.length
-        ? this._t(low.length > 1 ? 'low_many' : 'low_one', { n: low.length })
+      : counts.length
+        ? counts.join(' · ')
         : this._t(all.length ? 'all_ok' : 'no_batteries');
     const cols = Math.min(3, Math.max(1, Number(c.columns) || 1));
 
     const rows = shown
       .map((b) => {
-        const kind = b.unavailable ? 'na' : b.low ? (b.due ? 'alert' : 'warn') : 'ok';
+        // An unavailable battery is an alert too (often a dead one), shown with its own icon.
+        const kind = `${b.low || b.unavailable ? (b.due ? 'alert' : 'warn') : 'ok'}${b.unavailable ? ' na' : ''}`;
         const value = b.unavailable ? this._t('unavailable') : b.level == null ? this._t('low') : `${b.level} %`;
-        const sub = [b.area, b.low && b.below_since ? this._since(b.below_since) : null].filter(Boolean).join(' · ');
+        const since = b.below_since ? this._since(b.below_since, b.unavailable ? 'since_unavailable' : 'since') : null;
+        const sub = [b.area, since].filter(Boolean).join(' · ');
         const bar = b.level == null ? '' : `<span class="bar" style="width:${Math.max(2, Math.min(100, b.level))}%"></span>`;
         return `
           <button class="row ${kind}" data-id="${bmEsc(b.entity_id)}" title="${bmEsc(b.name)} — ${bmEsc(value)}">
@@ -230,7 +246,7 @@ class BatteryMonitorCard extends HTMLElement {
              background: var(--secondary-background-color, transparent); border: 1px solid transparent; }
       .row.warn  { --t: var(--bm-warn); }
       .row.alert { --t: var(--bm-alert); }
-      .row.na    { --t: var(--bm-na); opacity: .75; }
+      .row.na .lvl { font-weight: 500; }
       .row.warn, .row.alert {
         background: color-mix(in srgb, var(--t) 8%, var(--secondary-background-color, transparent));
         border-color: color-mix(in srgb, var(--t) 22%, transparent); }

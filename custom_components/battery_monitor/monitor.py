@@ -2,8 +2,9 @@
 
 A battery is a `sensor` with the `battery` device class (level in %) or a `binary_sensor` with the
 `battery` device class (`on` = low). A device with several of them is listed once, with its level sensor.
-A battery becomes *low* below the threshold, and *due* once it has stayed low for the configured duration:
-the due batteries are the ones notified.
+A battery needs attention when it is *low* (below the threshold) or *unavailable* (`unavailable` /
+`unknown`, often a dead battery), and becomes *due* once it has needed attention for the configured
+duration: the due batteries are the ones notified.
 """
 
 from __future__ import annotations
@@ -45,8 +46,13 @@ class Battery:
     level: int | None  # None for a binary sensor or an unavailable battery
     low: bool
     unavailable: bool
-    below_since: datetime | None
+    below_since: datetime | None  # since it needs attention (low or unavailable)
     due: bool
+
+    @property
+    def alert(self) -> bool:
+        """Needs attention: low, or unavailable."""
+        return self.low or self.unavailable
 
     @property
     def icon(self) -> str:
@@ -69,6 +75,7 @@ class Battery:
             "level": self.level,
             "icon": self.icon,
             "low": self.low,
+            "alert": self.alert,
             "due": self.due,
             "unavailable": self.unavailable,
             "below_since": self.below_since.isoformat() if self.below_since else None,
@@ -142,6 +149,14 @@ class BatteryMonitor:
         return [b for b in self.batteries if b.low]
 
     @property
+    def unavailable(self) -> list[Battery]:
+        return [b for b in self.batteries if b.unavailable]
+
+    @property
+    def alerts(self) -> list[Battery]:
+        return [b for b in self.batteries if b.alert]
+
+    @property
     def due(self) -> list[Battery]:
         return [b for b in self.batteries if b.due]
 
@@ -152,19 +167,19 @@ class BatteryMonitor:
                 self._below_since[entity_id] = since
         known = set(self._below_since)
         self.async_refresh()
-        # Batteries already low when first seen (just installed, or newly found): look up in the
-        # history when they went low, rather than starting the count now.
-        new = [b.entity_id for b in self.low if b.entity_id not in known]
+        # Batteries already low or unavailable when first seen (just installed, or newly found): look
+        # up in the history since when, rather than starting the count now.
+        new = [b.entity_id for b in self.alerts if b.entity_id not in known]
         if new:
             try:
                 await self._async_backfill(new)
             except Exception:  # noqa: BLE001 - the history only makes the start time more accurate
                 _LOGGER.exception("Could not read the history of the low batteries")
 
-    def _is_low(self, state: State) -> bool | None:
-        """True / False for a battery state, None when unavailable."""
+    def _needs_attention(self, state: State) -> bool | None:
+        """Low or unavailable: True; fine: False; a level that can't be read: None."""
         if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return None
+            return True
         # Recorded states (LazyState) have no `domain`: read it from the entity ID.
         if state.entity_id.startswith("binary_sensor."):
             return state.state == "on"
@@ -172,17 +187,17 @@ class BatteryMonitor:
         return None if level is None else level < self.threshold
 
     async def _async_backfill(self, entity_ids: list[str]) -> None:
-        """Set when each battery went low: right after its last state above the threshold."""
+        """Set since when each battery needs attention: right after its last fine state."""
         now = dt_util.utcnow()
         states = await _async_history(self.hass, entity_ids, now - timedelta(hours=MAX_DURATION))
         for entity_id in entity_ids:
-            recorded = [s for s in states.get(entity_id, []) if self._is_low(s) is not None]
+            recorded = [s for s in states.get(entity_id, []) if self._needs_attention(s) is not None]
             if not recorded:
                 continue
-            # Low for the whole recorded period, or since the last time it went below the threshold.
-            since = recorded[0].last_changed if self._is_low(recorded[0]) else None
+            # Needing attention for the whole recorded period, or since the last time it was fine.
+            since = recorded[0].last_changed if self._needs_attention(recorded[0]) else None
             for previous, state in pairwise(recorded):
-                if not self._is_low(previous) and self._is_low(state):
+                if not self._needs_attention(previous) and self._needs_attention(state):
                     since = state.last_changed
             if since is not None and since < self._below_since.get(entity_id, now):
                 self._below_since[entity_id] = since
@@ -237,12 +252,13 @@ class BatteryMonitor:
                 low = state.state == "on"
             else:
                 low = level is not None and level < self.threshold
-            # An unavailable battery keeps the time it went low: it is often a dead one.
-            if low:
+            # Low and unavailable share the same time: a battery that goes low then unavailable is
+            # most likely dead, and keeps counting from when it went low.
+            if low or unavailable:
                 self._below_since.setdefault(state.entity_id, now)
-            elif not unavailable:
+            else:
                 self._below_since.pop(state.entity_id, None)
-            since = self._below_since.get(state.entity_id) if low else None
+            since = self._below_since.get(state.entity_id)
             area_id = (entry.area_id if entry else None) or (device.area_id if device else None)
             area = areas.async_get_area(area_id) if area_id else None
             name = (device.name_by_user or device.name) if device else None
@@ -260,8 +276,8 @@ class BatteryMonitor:
                 )
             )
 
-        # Lowest first; batteries without a level (binary sensors, unavailable) after the levels.
-        batteries.sort(key=lambda b: (not b.low, b.level is None, b.level or 0, b.name.casefold()))
+        # Needing attention first: lowest levels, then low binary sensors, then unavailable batteries.
+        batteries.sort(key=lambda b: (not b.alert, b.unavailable, b.level is None, b.level or 0, b.name.casefold()))
         tracked = {b.entity_id for b in batteries}
         self._below_since = {k: v for k, v in self._below_since.items() if k in tracked}
         self.batteries = batteries
@@ -280,11 +296,11 @@ class BatteryMonitor:
     async def async_notify(self, manual: bool = False) -> None:
         """Notify the batteries that have been low for the duration; clear the notification when none is.
 
-        Asked for (button, action): every low battery, whatever the duration, and a message even
-        when none is low, so the person who asked gets an answer.
+        Asked for (button, action): every battery that needs attention, whatever the duration, and a
+        message even when none does, so the person who asked gets an answer.
         """
         self.async_refresh()
-        due = [b for b in self.low if not b.unavailable] if manual else self.due
+        due = self.alerts if manual else self.due
         self.last_notification = dt_util.utcnow()
         self.last_notified = len(due)
         if not due:
@@ -302,16 +318,15 @@ class BatteryMonitor:
             template = strings.get(f"component.{DOMAIN}.exceptions.{key}.message", key)
             return template.format(**values)
 
-        lines = [
-            text(
-                "line" if b.level is not None else "line_no_level",
-                name=b.name,
-                level=b.level,
-                area=f" ({b.area})" if b.area else "",
-            )
-            for b in due
-        ]
-        title = text("title_one" if len(due) == 1 else "title_many", count=len(due))
+        def key(b: Battery) -> str:
+            if b.unavailable:
+                return "line_unavailable"
+            return "line" if b.level is not None else "line_no_level"
+
+        lines = [text(key(b), name=b.name, level=b.level, area=f" ({b.area})" if b.area else "") for b in due]
+        # "low batteries" when all are low, "batteries to check" as soon as one is unavailable
+        kind = "check" if any(b.unavailable for b in due) else "title"
+        title = text(f"{kind}_one" if len(due) == 1 else f"{kind}_many", count=len(due))
         await self._async_send(title, "\n".join(lines))
         self._notify_listeners()
 

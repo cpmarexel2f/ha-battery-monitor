@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+### What's new
+- Unavailable batteries are reported too: a battery whose state is `unavailable` or `unknown` (often a dead battery) needs attention like a low one. It is notified once it has been unavailable for the duration (*Motion sensor (Garage): unavailable*), and right away with **Notify now**; the title becomes *N batteries to check* as soon as one is unavailable.
+- A battery that goes low then unavailable keeps counting from when it went low.
+- The card shows unavailable batteries as alerts (orange, then red and blinking once notified) with how long they have been unavailable, right after the low ones; the pill counts both (*3 low · 1 unavailable*). *Hide the batteries that are fine* and *Hide the card when every battery is fine* take them into account.
+- `unavailable` attribute (count) on the **Low batteries** sensor, `alert` on each battery.
+
 ## 1.0.1
 
 ### Fixes

@@ -245,7 +245,7 @@ async def test_manual_notify_none_low(hass: HomeAssistant) -> None:
     await _setup(hass, **{CONF_NOTIFY: ["notify.mobile_app_phone"]})
 
     await hass.services.async_call(DOMAIN, "notify", {}, blocking=True)
-    assert calls[0].data == {"title": "No low battery", "message": "Every battery is above 20 %."}
+    assert calls[0].data == {"title": "No battery to check", "message": "Every battery is above 20 % and available."}
     assert _notification(hass) is None
 
 
@@ -293,3 +293,40 @@ async def test_low_since_from_real_recorder(recorder_mock, hass: HomeAssistant, 
     battery = _batteries(hass)[0]
     assert dt_util.parse_datetime(battery["below_since"]) == went_low
     assert battery["due"]
+
+
+async def test_unavailable_batteries_notified(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    calls = async_mock_service(hass, "notify", "mobile_app_phone")
+    add_battery(hass, "Door", "12", area="Kitchen")
+    motion = add_battery(hass, "Motion", "unavailable", area="Garage")
+    add_battery(hass, "Smoke", "unknown", domain="binary_sensor")
+    add_battery(hass, "Lock", "80")
+    await _setup(hass, **{CONF_DURATION: 6, CONF_NOTIFY: ["notify.mobile_app_phone"]})
+
+    state = hass.states.get(LOW)
+    assert state.state == "1"
+    assert state.attributes["unavailable"] == 2
+    batteries = {b["name"]: b for b in _batteries(hass)}
+    assert [b["name"] for b in _batteries(hass)] == ["Door", "Motion", "Smoke", "Lock"]
+    assert batteries["Motion"]["alert"] and not batteries["Motion"]["low"] and batteries["Motion"]["below_since"]
+    assert not batteries["Lock"]["alert"]
+
+    # Asked for: right away, whatever the duration
+    await hass.services.async_call("button", "press", {"entity_id": BUTTON}, blocking=True)
+    assert calls[-1].data == {
+        "title": "3 batteries to check",
+        "message": "• Door (Kitchen): 12 %\n• Motion (Garage): unavailable\n• Smoke: unavailable",
+    }
+
+    # Back before the duration: no longer counted
+    hass.states.async_set(motion, "64", {"device_class": "battery", "unit_of_measurement": "%"})
+    await hass.async_block_till_done()
+    assert hass.states.get(LOW).attributes["unavailable"] == 1
+    assert {b["name"]: b for b in _batteries(hass)}["Motion"]["below_since"] is None
+
+    # Still unavailable after the duration: due, and in the scheduled notification
+    freezer.tick(timedelta(hours=6, minutes=10))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    batteries = {b["name"]: b for b in _batteries(hass)}
+    assert batteries["Smoke"]["due"] and batteries["Door"]["due"] and not batteries["Motion"]["alert"]
