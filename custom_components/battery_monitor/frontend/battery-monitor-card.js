@@ -4,7 +4,7 @@
  * Served and added to the dashboard resources by the integration.
  * https://github.com/juju35/ha-battery-monitor
  */
-var BATTERY_MONITOR_CARD_VERSION = '1.6.0';
+var BATTERY_MONITOR_CARD_VERSION = '1.6.1';
 
 const BM_I18N = {
   en: {
@@ -172,6 +172,14 @@ function bmDetectedType(hass, b) {
   if (a.battery_type) return bmParseType(a.battery_type, a.battery_quantity);
   const sensor = hass?.states?.[bmTypeSensorOf(hass?.entities, b.device_id)];
   return sensor ? bmParseType(sensor.state, sensor.attributes?.battery_quantity) : null;
+}
+
+// The icon of a room, from the area registry (the battery list names its area): the area's own icon, else a door,
+// and a house for the batteries without a room.
+function bmAreaIcon(hass, name) {
+  if (!name) return 'mdi:home-outline';
+  const area = Object.values(hass?.areas || {}).find((a) => a?.name === name);
+  return area?.icon || 'mdi:door-open';
 }
 
 // The model of a battery's device ("Hue dimmer switch", "MYGGBETT door/window sensor"), from the device registry.
@@ -453,7 +461,7 @@ class BatteryMonitorCard extends HTMLElement {
           ? this._t('rechargeable')
           : key
         : this._t(view === 'room' ? 'no_area' : 'unknown_type'),
-      icon: view === 'room' ? 'mdi:door-open' : key ? 'mdi:battery-outline' : 'mdi:battery-unknown',
+      icon: view === 'room' ? bmAreaIcon(this._hass, key) : key ? 'mdi:battery-outline' : 'mdi:battery-unknown',
       hint: view === 'type' && !key ? this._t('unknown_type_hint') : '',
       // By type, the batteries of that type in all (a remote with 2 AAA counts 2); by room, the devices.
       cells: view === 'type' && key && key !== 'rechargeable' ? items.reduce((n, x) => n + x.cells, 0) : null,

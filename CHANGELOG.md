@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.1
+
+### Fixes
+- Card full screen, by room: each room shows its own icon from the area settings (a door when it has none, a house for the batteries without a room).
+
 ## 1.6.0
 
 ### Changes

@@ -216,6 +216,10 @@ const typedHass = (lang = 'en') => ({
     'sensor.door_battery': { state: '12', attributes: { battery_type: 'CR2032', battery_quantity: 1 } },
     'sensor.lock_battery_type': { state: 'AA', attributes: { battery_quantity: 4 } },
   },
+  areas: {
+    entrance: { area_id: 'entrance', name: 'Entrance', icon: 'mdi:door' },
+    living_room: { area_id: 'living_room', name: 'Living room', icon: null },
+  },
   devices: {
     dev_door: { model: 'Door sensor', manufacturer: 'Acme' },
     dev_remote: { model: 'Remote control', manufacturer: 'Acme' },
@@ -360,4 +364,16 @@ test('editor: a type field for each model, the batteries left without a type bel
   );
   editor._form.dispatch({ battery_models: { 'Remote control': '2× AAA', 'Leak sensor': 'CR2032' }, battery_types: {} });
   assert.deepEqual(JSON.parse(JSON.stringify(config)), { battery_models: { 'Remote control': '2× AAA', 'Leak sensor': 'CR2032' } });
+});
+
+test('full screen by room: each room with its own icon', () => {
+  const card = makeCard();
+  card.hass = typedHass();
+  card._openPopup();
+  const pop = body.children[0].shadowRoot.innerHTML;
+  card._closePopup();
+  assert.match(pop, /<ha-icon icon="mdi:door"><\/ha-icon><span class="gname">Entrance</);
+  // A room without an icon: a door; the batteries without a room: a house.
+  assert.match(pop, /<ha-icon icon="mdi:door-open"><\/ha-icon><span class="gname">Living room</);
+  assert.match(pop, /<ha-icon icon="mdi:home-outline"><\/ha-icon><span class="gname">No room</);
 });
