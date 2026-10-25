@@ -252,7 +252,7 @@ test('full screen: by room and by type, what to replace; reopens after closing',
     // By room: the rooms by name, the room-less last; the type under each name.
     assert.ok(pop.indexOf('>Entrance<') < pop.indexOf('>Living room<'));
     assert.ok(pop.indexOf('>Living room<') < pop.indexOf('>No room<'));
-    assert.match(pop, /class="name">Lock<\/span>\s*<span class="sub">AA ×4<\/span>/);
+    assert.match(pop, /class="name">Lock<\/span>\s*<span class="sub">4× AA<\/span>/);
     // What to buy for the 3 batteries needing attention.
     assert.match(pop, /<b>2×<\/b> AAA<\/span><span class="buy"><b>1×<\/b> CR2032<\/span><span class="buy unknown"><b>1×<\/b> Unknown type/);
     if (i) listeners.keydown({ key: 'Escape' });
@@ -267,7 +267,9 @@ test('full screen: by room and by type, what to replace; reopens after closing',
   assert.match(pop, /class="tab on" data-view="type"/);
   assert.ok(pop.indexOf('>AAA<') < pop.indexOf('>Unknown type<'));
   assert.match(pop, /Set the type in the card editor/);
-  assert.match(pop, /class="name">Remote<\/span>\s*<span class="sub">Living room · ×2<\/span>/);
+  // By type, the group counts the batteries of that type: the lock's 4 AA.
+  assert.match(pop, /class="gname">AA<\/span>\s*<span class="gcount">4 batteries<\/span>/);
+  assert.match(pop, /class="name">Remote<\/span>\s*<span class="sub">Living room · 2 batteries<\/span>/);
   card._closePopup();
 });
 
@@ -310,9 +312,9 @@ test('the list shows each battery type next to its room', () => {
   const card = makeCard({ battery_types: { 'sensor.remote_battery': '2× AAA' } });
   card.hass = typedHass();
   const out = html(card);
-  assert.match(out, /class="name">Door<\/span>\s*<span class="sub">Entrance · CR2032<\/span>/);
-  assert.match(out, /class="name">Lock<\/span>\s*<span class="sub">Entrance · AA ×4<\/span>/);
-  assert.match(out, /class="name">Remote<\/span>\s*<span class="sub">Living room · AAA ×2<\/span>/);
+  assert.match(out, /class="name">Door<\/span>\s*<span class="sub">Entrance · 1× CR2032<\/span>/);
+  assert.match(out, /class="name">Lock<\/span>\s*<span class="sub">Entrance · 4× AA<\/span>/);
+  assert.match(out, /class="name">Remote<\/span>\s*<span class="sub">Living room · 2× AAA<\/span>/);
   // No room and no type: nothing under the name.
   assert.match(out, /class="name">Leak<\/span>\s*<\/span>/);
 });

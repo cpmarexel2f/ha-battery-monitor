@@ -4,7 +4,7 @@
  * Served and added to the dashboard resources by the integration.
  * https://github.com/juju35/ha-battery-monitor
  */
-var BATTERY_MONITOR_CARD_VERSION = '1.5.1';
+var BATTERY_MONITOR_CARD_VERSION = '1.5.2';
 
 const BM_I18N = {
   en: {
@@ -51,6 +51,8 @@ const BM_I18N = {
     rechargeable: 'Built-in rechargeable',
     count: '{n} batteries',
     count_one: '1 battery',
+    cells: '{n} batteries',
+    cells_one: '1 battery',
     to_check: '{n} to check',
     to_replace: 'To replace',
     nothing_to_replace: 'Nothing to replace',
@@ -99,6 +101,8 @@ const BM_I18N = {
     rechargeable: 'Batterie rechargeable intégrée',
     count: '{n} batteries',
     count_one: '1 batterie',
+    cells: '{n} piles',
+    cells_one: '1 pile',
     to_check: '{n} à vérifier',
     to_replace: 'À remplacer',
     nothing_to_replace: 'Rien à remplacer',
@@ -339,10 +343,11 @@ class BatteryMonitorCard extends HTMLElement {
     this.dispatchEvent(ev);
   }
 
-  _typeLabel(t) {
+  // The battery type with how many it takes: "1× CR2032", "4× AA"; a built-in rechargeable battery has no count.
+  _typeLabel(t, withCount = true) {
     if (!t) return '';
-    const name = t.type === 'rechargeable' ? this._t('rechargeable') : t.type;
-    return t.quantity > 1 ? `${name} ×${t.quantity}` : name;
+    if (t.type === 'rechargeable') return this._t('rechargeable');
+    return withCount ? `${t.quantity || 1}× ${t.type}` : t.type;
   }
 
   // One battery: `context` (its room, or its type) then how long it has needed attention, under its name.
@@ -424,7 +429,9 @@ class BatteryMonitorCard extends HTMLElement {
       const t = bmTypeOf(this._hass, this._config, b);
       const key = view === 'room' ? b.area || '' : t?.type || '';
       if (!map.has(key)) map.set(key, []);
-      map.get(key).push({ b, context: view === 'room' ? this._typeLabel(t) : [b.area, t?.quantity > 1 ? `×${t.quantity}` : ''].filter(Boolean).join(' · ') });
+      // By type, the group names the type: each battery tells its room and how many it takes.
+      const count = t && t.type !== 'rechargeable' ? this._t(t.quantity > 1 ? 'cells' : 'cells_one', { n: t.quantity }) : '';
+      map.get(key).push({ b, cells: t?.quantity || 1, context: view === 'room' ? this._typeLabel(t) : [b.area, count].filter(Boolean).join(' · ') });
     }
     const groups = [...map.entries()].map(([key, items]) => ({
       key,
@@ -436,9 +443,16 @@ class BatteryMonitorCard extends HTMLElement {
         : this._t(view === 'room' ? 'no_area' : 'unknown_type'),
       icon: view === 'room' ? 'mdi:door-open' : key ? 'mdi:battery-outline' : 'mdi:battery-unknown',
       hint: view === 'type' && !key ? this._t('unknown_type_hint') : '',
+      // By type, the batteries of that type in all (a remote with 2 AAA counts 2); by room, the devices.
+      cells: view === 'type' && key && key !== 'rechargeable' ? items.reduce((n, x) => n + x.cells, 0) : null,
     }));
     // Rooms by name, types by how many batteries use them; the room-less and the unknown last.
     return groups.sort((a, b) => !a.key - !b.key || (view === 'type' ? b.items.length - a.items.length : 0) || a.name.localeCompare(b.name));
+  }
+
+  _groupCount(g) {
+    if (g.cells != null) return this._t(g.cells > 1 ? 'cells' : 'cells_one', { n: g.cells });
+    return g.items.length > 1 ? this._t('count', { n: g.items.length }) : this._t('count_one');
   }
 
   // What to buy: the types of the batteries needing attention, with how many of each.
@@ -451,7 +465,7 @@ class BatteryMonitorCard extends HTMLElement {
     }
     return [...need.entries()]
       .sort((a, b) => !a[0] - !b[0] || b[1] - a[1])
-      .map(([type, n]) => `<span class="buy${type ? '' : ' unknown'}"><b>${n}×</b> ${bmEsc(type ? this._typeLabel({ type, quantity: 1 }) : this._t('unknown_type'))}</span>`)
+      .map(([type, n]) => `<span class="buy${type ? '' : ' unknown'}"><b>${n}×</b> ${bmEsc(type ? this._typeLabel({ type }, false) : this._t('unknown_type'))}</span>`)
       .join('');
   }
 
@@ -474,7 +488,7 @@ class BatteryMonitorCard extends HTMLElement {
         <section class="group${alerts ? ' attention' : ''}">
           <div class="ghead"><ha-icon icon="${g.icon}"></ha-icon><span class="gname">${bmEsc(g.name)}</span>
             ${alerts ? `<span class="gchip">${bmEsc(this._t('to_check', { n: alerts }))}</span>` : ''}
-            <span class="gcount">${bmEsc(g.items.length > 1 ? this._t('count', { n: g.items.length }) : this._t('count_one'))}</span></div>
+            <span class="gcount">${bmEsc(this._groupCount(g))}</span></div>
           ${g.hint ? `<div class="ghint">${bmEsc(g.hint)}</div>` : ''}
           <div class="glist">${g.items.map(({ b, context }) => this._row(b, context)).join('')}</div>
         </section>`;

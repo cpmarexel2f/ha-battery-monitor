@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2
+
+### Changes
+- Card: how many batteries each device takes, before its type: *1× CR2032*, *4× AA*, in the list and in the full screen view by room; by type, each battery tells its room and its count (*2 piles*), and each type how many batteries it takes in all.
+
 ## 1.5.1
 
 ### Changes
