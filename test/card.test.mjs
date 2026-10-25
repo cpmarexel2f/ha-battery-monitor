@@ -8,17 +8,68 @@ const source = readFileSync(
   new URL('../custom_components/battery_monitor/frontend/battery-monitor-card.js', import.meta.url),
   'utf8',
 );
+// A page body, keyboard listeners and history: enough for the full screen layer.
+const fakeNode = () => ({
+  innerHTML: '',
+  style: {},
+  children: [],
+  handlers: {},
+  addEventListener(type, fn) {
+    this.handlers[type] = fn;
+  },
+  // An ha-form stand-in: what the user changes in the editor.
+  dispatch(value) {
+    this.handlers['value-changed']({ detail: { value } });
+  },
+  attachShadow() {
+    this.shadowRoot = { innerHTML: '', addEventListener() {}, querySelector: () => null };
+    return this.shadowRoot;
+  },
+});
+const body = {
+  ...fakeNode(),
+  appendChild(el) {
+    this.children.push(el);
+    el.isConnected = true;
+    el.remove = () => this.removeChild(el);
+  },
+  // Like the browser: removing a node that is not a child throws.
+  removeChild(el) {
+    if (!this.children.includes(el)) throw new Error('NotFoundError');
+    this.children = this.children.filter((x) => x !== el);
+    el.isConnected = false;
+  },
+};
+const listeners = {};
 const context = {
   HTMLElement: class {},
   customElements: { get: () => true, define() {} },
-  window: {},
-  document: {},
+  window: {
+    history: { state: null, pushState(state) { this.state = state; }, back() { this.state = null; } },
+    addEventListener() {},
+    removeEventListener() {},
+  },
+  document: {
+    body,
+    createElement: () => fakeNode(),
+    addEventListener: (type, fn) => (listeners[type] = fn),
+    removeEventListener: (type) => delete listeners[type],
+  },
+  CustomEvent: class {
+    constructor(type, init) {
+      this.type = type;
+      this.detail = init?.detail;
+    }
+  },
   console,
   Date,
 };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.bm = { BatteryMonitorCard, BM_I18N, bmEsc, bmLang };`, context);
-const { BatteryMonitorCard, BM_I18N, bmEsc, bmLang } = context.bm;
+vm.runInContext(
+  `${source}\nthis.bm = { BatteryMonitorCard, BatteryMonitorCardEditor, BM_I18N, bmEsc, bmLang, bmParseType, bmTypeOf };`,
+  context,
+);
+const { BatteryMonitorCard, BatteryMonitorCardEditor, BM_I18N, bmEsc, bmLang, bmParseType, bmTypeOf } = context.bm;
 
 const SENSOR = 'sensor.battery_monitor_low_batteries';
 const BUTTON = 'button.battery_monitor_notify_now';
@@ -144,4 +195,113 @@ test('only_low hides the batteries in good shape', () => {
   card.hass = hassWith(registry(), { [SENSOR]: realState });
   assert.ok(!html(card).includes('Lamp'));
   assert.ok(html(card).includes('Leak'));
+});
+
+// ── Full screen, battery types ───────────────────────────────────────────────
+const ROOMS = [
+  { entity_id: 'sensor.door_battery', device_id: 'dev_door', name: 'Door', area: 'Entrance', level: 12, low: true, icon: 'mdi:battery-10' },
+  { entity_id: 'sensor.lock_battery', device_id: 'dev_lock', name: 'Lock', area: 'Entrance', level: 80, low: false, icon: 'mdi:battery-80' },
+  { entity_id: 'sensor.remote_battery', device_id: 'dev_remote', name: 'Remote', area: 'Living room', level: 9, low: true, icon: 'mdi:battery-10' },
+  { entity_id: 'sensor.leak_battery', device_id: 'dev_leak', name: 'Leak', area: null, level: null, unavailable: true, icon: 'mdi:battery-unknown' },
+];
+const typedHass = (lang = 'en') => ({
+  entities: {
+    ...registry(),
+    'sensor.lock_battery_type': { platform: 'battery_notes', device_id: 'dev_lock', translation_key: 'battery_type' },
+  },
+  states: {
+    [SENSOR]: { state: '2', attributes: { batteries: ROOMS } },
+    [BUTTON]: { state: 'unknown', attributes: {} },
+    // Battery Notes: the attributes on the battery entity, or a "Battery type" sensor on its device.
+    'sensor.door_battery': { state: '12', attributes: { battery_type: 'CR2032', battery_quantity: 1 } },
+    'sensor.lock_battery_type': { state: 'AA', attributes: { battery_quantity: 4 } },
+  },
+  language: lang,
+  locale: { language: lang },
+  callService() {},
+});
+
+test('bmParseType reads a quantity before or after the type', () => {
+  assert.deepEqual({ ...bmParseType('2× AA') }, { type: 'AA', quantity: 2 });
+  assert.deepEqual({ ...bmParseType('3x AAA') }, { type: 'AAA', quantity: 3 });
+  assert.deepEqual({ ...bmParseType('CR2032 x2') }, { type: 'CR2032', quantity: 2 });
+  assert.deepEqual({ ...bmParseType('CR2450') }, { type: 'CR2450', quantity: 1 });
+  assert.deepEqual({ ...bmParseType('AA', 4) }, { type: 'AA', quantity: 4 });
+  assert.equal(bmParseType(''), null);
+  assert.equal(bmParseType('unknown'), null);
+});
+
+test('battery type: the card setting first, then Battery Notes attributes, then its sensor on the device', () => {
+  const hass = typedHass();
+  assert.equal(bmTypeOf(hass, {}, ROOMS[0]).type, 'CR2032');
+  assert.deepEqual({ ...bmTypeOf(hass, {}, ROOMS[1]) }, { type: 'AA', quantity: 4 });
+  assert.equal(bmTypeOf(hass, {}, ROOMS[2]), null);
+  assert.equal(bmTypeOf(hass, { battery_types: { 'sensor.remote_battery': '2× AAA' } }, ROOMS[2]).quantity, 2);
+  assert.equal(bmTypeOf(hass, { battery_types: { 'sensor.door_battery': 'CR2450' } }, ROOMS[0]).type, 'CR2450');
+});
+
+test('full screen: by room and by type, what to replace; reopens after closing', () => {
+  const card = makeCard({ battery_types: { 'sensor.remote_battery': '2× AAA' } });
+  card.hass = typedHass();
+  assert.ok(html(card).includes('class="full"'), 'the full screen button is missing');
+  for (let i = 0; i < 2; i++) {
+    card._openPopup();
+    assert.equal(body.children.length, 1, `open #${i + 1}`);
+    assert.equal(body.style.overflow, 'hidden');
+    const pop = body.children[0].shadowRoot.innerHTML;
+    // By room: the rooms by name, the room-less last; the type under each name.
+    assert.ok(pop.indexOf('>Entrance<') < pop.indexOf('>Living room<'));
+    assert.ok(pop.indexOf('>Living room<') < pop.indexOf('>No room<'));
+    assert.match(pop, /class="name">Lock<\/span>\s*<span class="sub">AA ×4<\/span>/);
+    // What to buy for the 3 batteries needing attention.
+    assert.match(pop, /<b>2×<\/b> AAA<\/span><span class="buy"><b>1×<\/b> CR2032<\/span><span class="buy unknown"><b>1×<\/b> Unknown type/);
+    if (i) listeners.keydown({ key: 'Escape' });
+    else card._onPopupClick({ composedPath: () => [{ classList: { contains: (c) => c === 'close' }, dataset: {} }] });
+    assert.equal(body.children.length, 0, `closed #${i + 1}`);
+    assert.equal(body.style.overflow, '');
+  }
+  card._openPopup();
+  card._onPopupClick({ composedPath: () => [{ classList: { contains: () => false }, dataset: { view: 'type' } }] });
+  const pop = body.children[0].shadowRoot.innerHTML;
+  // By type: the most used types first, the unknown last with its hint; the room under each name.
+  assert.match(pop, /class="tab on" data-view="type"/);
+  assert.ok(pop.indexOf('>AAA<') < pop.indexOf('>Unknown type<'));
+  assert.match(pop, /Set the type in the card editor/);
+  assert.match(pop, /class="name">Remote<\/span>\s*<span class="sub">Living room · ×2<\/span>/);
+  card._closePopup();
+});
+
+test('the full screen button can be turned off', () => {
+  const card = makeCard({ popup: false });
+  card.hass = typedHass();
+  assert.ok(!html(card).includes('class="full"'));
+});
+
+test('editor: a type field for each battery whose type is not detected, labelled with its name and room', () => {
+  const editor = new BatteryMonitorCardEditor();
+  editor.appendChild = () => {};
+  editor.setConfig({ battery_types: { 'sensor.door_battery': 'CR2450' } });
+  editor.hass = typedHass('fr');
+  const group = editor._form.schema.find((s) => s.name === 'battery_types');
+  assert.equal(group.type, 'expandable');
+  assert.equal(group.title, 'Types de pile');
+  // The door is set in the card, the lock detected (left out), the remote and the leak sensor to set.
+  assert.deepEqual(
+    group.schema.map((s) => s.name),
+    ['sensor.door_battery', 'sensor.remote_battery', 'sensor.leak_battery'],
+  );
+  assert.equal(group.schema[0].selector.select.custom_value, true);
+  assert.equal(editor._form.computeLabel({ name: 'sensor.remote_battery' }), 'Remote · Living room');
+  assert.equal(editor._form.data.battery_types['sensor.door_battery'], 'CR2450');
+});
+
+test('editor: empty battery types are not written to the YAML', () => {
+  const editor = new BatteryMonitorCardEditor();
+  editor.appendChild = () => {};
+  let config;
+  editor.dispatchEvent = (ev) => (config = ev.detail.config);
+  editor.setConfig({});
+  editor.hass = typedHass();
+  editor._form.dispatch({ battery_types: { 'sensor.remote_battery': '2× AAA', 'sensor.leak_battery': '' }, popup: true });
+  assert.deepEqual(JSON.parse(JSON.stringify(config)), { battery_types: { 'sensor.remote_battery': '2× AAA' } });
 });

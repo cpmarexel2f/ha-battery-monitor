@@ -1,10 +1,10 @@
 /**
  * battery-monitor-card — the batteries watched by the Battery Monitor integration:
- * icon, name, room and level, the lowest first.
+ * icon, name, room and level, the lowest first; full screen, grouped by room or by battery type.
  * Served and added to the dashboard resources by the integration.
  * https://github.com/juju35/ha-battery-monitor
  */
-var BATTERY_MONITOR_CARD_VERSION = '1.4.0';
+var BATTERY_MONITOR_CARD_VERSION = '1.5.0';
 
 const BM_I18N = {
   en: {
@@ -36,6 +36,24 @@ const BM_I18N = {
     ed_notify_button_helper: 'Sends the low-battery notification from the header',
     ed_language: 'Language',
     ed_language_helper: 'Leave empty to follow Home Assistant',
+    ed_popup: 'Full screen button',
+    ed_popup_helper: 'Opens every battery over the whole screen, by room or by battery type',
+    ed_battery_types: 'Battery types',
+    ed_battery_types_helper:
+      'The batteries whose type is not detected (Battery Notes): pick it or type it, e.g. CR2032, 2× AA',
+    popup_open: 'Full screen',
+    popup_close: 'Close',
+    by_room: 'By room',
+    by_type: 'By battery type',
+    no_area: 'No room',
+    unknown_type: 'Unknown type',
+    unknown_type_hint: 'Set the type in the card editor',
+    rechargeable: 'Built-in rechargeable',
+    count: '{n} batteries',
+    count_one: '1 battery',
+    to_check: '{n} to check',
+    to_replace: 'To replace',
+    nothing_to_replace: 'Nothing to replace',
   },
   fr: {
     title: 'Batteries',
@@ -66,6 +84,24 @@ const BM_I18N = {
     ed_notify_button_helper: 'Envoie la notification des batteries faibles depuis l’en-tête',
     ed_language: 'Langue',
     ed_language_helper: 'Laisser vide pour suivre Home Assistant',
+    ed_popup: 'Bouton plein écran',
+    ed_popup_helper: 'Affiche toutes les batteries sur tout l’écran, par pièce ou par type de pile',
+    ed_battery_types: 'Types de pile',
+    ed_battery_types_helper:
+      'Les batteries dont le type n’est pas détecté (Battery Notes) : le choisir ou le saisir, ex. CR2032, 2× AA',
+    popup_open: 'Plein écran',
+    popup_close: 'Fermer',
+    by_room: 'Par pièce',
+    by_type: 'Par type de pile',
+    no_area: 'Sans pièce',
+    unknown_type: 'Type inconnu',
+    unknown_type_hint: 'Définir le type dans l’éditeur de la carte',
+    rechargeable: 'Batterie rechargeable intégrée',
+    count: '{n} batteries',
+    count_one: '1 batterie',
+    to_check: '{n} à vérifier',
+    to_replace: 'À remplacer',
+    nothing_to_replace: 'Rien à remplacer',
   },
 };
 
@@ -80,7 +116,56 @@ const bmT = (lang, key, vars = {}) =>
 const bmEsc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-const BM_DEFAULTS = { columns: 1, only_low: false, hide_when_ok: false, notify_button: true };
+const BM_DEFAULTS = { columns: 1, only_low: false, hide_when_ok: false, notify_button: true, popup: true };
+
+// ── Battery types ────────────────────────────────────────────────────────────
+// The type comes from the card's `battery_types` (set in the editor), else from Battery Notes: the `battery_type` /
+// `battery_quantity` attributes of the battery entity, or its "Battery type" sensor on the same device.
+// "2× AA", "2x AA" or "AA x2" read as 2 AA batteries.
+const BM_TYPES = ['CR2032', 'CR2450', 'CR2477', 'CR2016', 'CR2025', 'CR1632', 'CR123A', 'CR2', 'AA', 'AAA', '2× AA',
+  '2× AAA', '3× AA', '3× AAA', '4× AA', 'LR44', '9V', '18650', 'ER14505', 'rechargeable'];
+
+function bmParseType(value, quantity) {
+  const s = String(value ?? '').trim();
+  if (!s || s === 'unknown' || s === 'unavailable') return null;
+  const m = /^(\d+)\s*[x×]\s*(.+)$/i.exec(s) || /^(.+?)\s*[x×]\s*(\d+)$/i.exec(s);
+  if (m) {
+    const [n, type] = /^\d+$/.test(m[1]) ? [m[1], m[2]] : [m[2], m[1]];
+    return { type: type.trim(), quantity: Number(n) };
+  }
+  const q = Number(quantity);
+  return { type: s, quantity: Number.isFinite(q) && q > 0 ? q : 1 };
+}
+
+// Battery Notes' "Battery type" sensors, by device, built once per entity registry object.
+const bmTypeSensors = new WeakMap();
+function bmTypeSensorOf(registry, deviceId) {
+  if (!registry || !deviceId) return undefined;
+  let index = bmTypeSensors.get(registry);
+  if (!index) {
+    index = new Map();
+    for (const [id, e] of Object.entries(registry)) {
+      if (e?.device_id && id.startsWith('sensor.') && (e.translation_key === 'battery_type' || /_battery_type$/.test(id))) {
+        index.set(e.device_id, id);
+      }
+    }
+    bmTypeSensors.set(registry, index);
+  }
+  return index.get(deviceId);
+}
+
+// The detected type of a battery (without the card's own setting), or null.
+function bmDetectedType(hass, b) {
+  const a = hass?.states?.[b.entity_id]?.attributes || {};
+  if (a.battery_type) return bmParseType(a.battery_type, a.battery_quantity);
+  const sensor = hass?.states?.[bmTypeSensorOf(hass?.entities, b.device_id)];
+  return sensor ? bmParseType(sensor.state, sensor.attributes?.battery_quantity) : null;
+}
+
+const bmTypeOf = (hass, config, b) => {
+  const set = config?.battery_types?.[b.entity_id];
+  return set ? bmParseType(set) : bmDetectedType(hass, b);
+};
 
 // The integration's sensors, from the entity registry.
 const bmCandidates = (registry) =>
@@ -116,6 +201,10 @@ class BatteryMonitorCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     this._render();
+  }
+
+  disconnectedCallback() {
+    this._closePopup();
   }
 
   getCardSize() {
@@ -173,37 +262,95 @@ class BatteryMonitorCard extends HTMLElement {
     this._shown = shown.length;
 
     // The current hour too: "low for X h" is computed from the clock, while below_since doesn't change.
-    const sig = JSON.stringify([c, bmLang(this._hass, c), entity, st?.state, all, button, Math.floor(Date.now() / 3600000)]);
+    // The battery types read from Battery Notes, which may change without the battery list changing.
+    const types = all.map((b) => bmTypeOf(this._hass, c, b));
+    const sig = JSON.stringify([c, bmLang(this._hass, c), entity, st?.state, all, types, button, Math.floor(Date.now() / 3600000)]);
     if (sig === this._sig) return;
     this._sig = sig;
+    this._state = { entity, button, all, low, unavailable, due, attention };
+    if (this._popup) this._renderPopup();
 
     const hidden = c.hide_when_ok && st && !attention;
     this.style.display = hidden ? 'none' : '';
     if (hidden) return;
 
-    const level = due.length ? 'alert' : attention ? 'warn' : 'ok';
+    const level = this._level();
     const counts = [
       low.length ? this._t(low.length > 1 ? 'low_many' : 'low_one', { n: low.length }) : '',
       unavailable.length
         ? this._t(unavailable.length > 1 ? 'unavailable_many' : 'unavailable_one', { n: unavailable.length })
         : '',
     ].filter(Boolean);
-    const status = !st
-      ? this._t('not_loaded')
-      : counts.length
-        ? counts.join(' · ')
-        : this._t(all.length ? 'all_ok' : 'no_batteries');
+    const status = this._status(st, counts, all);
     const cols = Math.min(3, Math.max(1, Number(c.columns) || 1));
 
-    const rows = shown
-      .map((b) => {
-        // An unavailable battery is an alert too (often a dead one), shown with its own icon.
-        const kind = `${b.low || b.unavailable ? (b.due ? 'alert' : 'warn') : 'ok'}${b.unavailable ? ' na' : ''}`;
-        const value = b.unavailable ? this._t('unavailable') : b.level == null ? this._t('low') : `${b.level} %`;
-        const since = b.below_since ? this._since(b.below_since, b.unavailable ? 'since_unavailable' : 'since') : null;
-        const sub = [b.area, since].filter(Boolean).join(' · ');
-        const bar = b.level == null ? '' : `<span class="bar" style="width:${Math.max(2, Math.min(100, b.level))}%"></span>`;
-        return `
+    const rows = shown.map((b) => this._row(b, b.area)).join('');
+
+    this.shadowRoot.innerHTML = `
+      <style>${BatteryMonitorCard.styles}</style>
+      <ha-card class="lvl-${level}">
+        <div class="head">
+          <div class="badge"><ha-icon icon="${level === 'ok' ? 'mdi:battery-check-outline' : 'mdi:battery-alert-variant-outline'}"></ha-icon></div>
+          <div class="title">${bmEsc(c.title || this._t('title'))}</div>
+          ${this._notifyButton()}
+          <div class="pill">${bmEsc(status)}</div>
+          ${
+            c.popup !== false && st
+              ? `<button class="full" title="${bmEsc(this._t('popup_open'))}" aria-label="${bmEsc(this._t('popup_open'))}"><ha-icon icon="mdi:fullscreen"></ha-icon></button>`
+              : ''
+          }
+        </div>
+        ${rows ? `<div class="list" style="--cols:${cols}">${rows}</div>` : ''}
+      </ha-card>`;
+
+    this.shadowRoot.querySelector('.notify')?.addEventListener('click', () => this._notify());
+    this.shadowRoot.querySelector('.full')?.addEventListener('click', () => this._openPopup());
+    for (const el of this.shadowRoot.querySelectorAll('.row')) el.addEventListener('click', () => this._moreInfo(el.dataset.id));
+  }
+
+  // 'alert' when a battery is due, 'warn' when one needs attention, else 'ok'.
+  _level() {
+    const s = this._state;
+    return s.due.length ? 'alert' : s.attention ? 'warn' : 'ok';
+  }
+
+  _status(st, counts, all) {
+    if (!st) return this._t('not_loaded');
+    return counts.length ? counts.join(' · ') : this._t(all.length ? 'all_ok' : 'no_batteries');
+  }
+
+  _notifyButton() {
+    const { button } = this._state;
+    if (!this._config.notify_button || !button) return '';
+    const label = bmEsc(this._t('notify_now'));
+    return `<button class="notify" title="${label}" aria-label="${label}"><ha-icon icon="mdi:bell-ring-outline"></ha-icon></button>`;
+  }
+
+  _notify() {
+    this._hass.callService('button', 'press', { entity_id: this._state.button });
+  }
+
+  _moreInfo(entityId) {
+    const ev = new Event('hass-more-info', { bubbles: true, composed: true });
+    ev.detail = { entityId };
+    this.dispatchEvent(ev);
+  }
+
+  _typeLabel(t) {
+    if (!t) return '';
+    const name = t.type === 'rechargeable' ? this._t('rechargeable') : t.type;
+    return t.quantity > 1 ? `${name} ×${t.quantity}` : name;
+  }
+
+  // One battery: `context` (its room, or its type) then how long it has needed attention, under its name.
+  _row(b, context) {
+    // An unavailable battery is an alert too (often a dead one), shown with its own icon.
+    const kind = `${b.low || b.unavailable ? (b.due ? 'alert' : 'warn') : 'ok'}${b.unavailable ? ' na' : ''}`;
+    const value = b.unavailable ? this._t('unavailable') : b.level == null ? this._t('low') : `${b.level} %`;
+    const since = b.below_since ? this._since(b.below_since, b.unavailable ? 'since_unavailable' : 'since') : null;
+    const sub = [context, since].filter(Boolean).join(' · ');
+    const bar = b.level == null ? '' : `<span class="bar" style="width:${Math.max(2, Math.min(100, b.level))}%"></span>`;
+    return `
           <button class="row ${kind}" data-id="${bmEsc(b.entity_id)}" title="${bmEsc(b.name)} — ${bmEsc(value)}">
             <span class="ic"><ha-icon icon="${bmEsc(b.icon)}"></ha-icon></span>
             <span class="txt">
@@ -212,35 +359,146 @@ class BatteryMonitorCard extends HTMLElement {
             </span>
             <span class="lvl">${bmEsc(value)}${bar ? `<span class="track">${bar}</span>` : ''}</span>
           </button>`;
+  }
+
+  // ── Full screen ──
+  // Every battery over the whole screen, grouped by room or by battery type, with what to buy for the ones to
+  // replace. Appended to the page's body so that no dashboard container clips it; closes with its button, Escape,
+  // a click outside or the back button.
+  _openPopup() {
+    if (this._popup?.isConnected) return;
+    if (this._popup) this._closePopup(true);
+    const host = document.createElement('div');
+    host.className = 'battery-monitor-popup';
+    const root = host.attachShadow({ mode: 'open' });
+    root.addEventListener('click', (ev) => this._onPopupClick(ev));
+    this._onPopupKey = (ev) => {
+      if (ev.key === 'Escape') this._closePopup();
+    };
+    this._onPopupBack = () => this._closePopup(true);
+    document.addEventListener('keydown', this._onPopupKey);
+    window.addEventListener?.('popstate', this._onPopupBack);
+    window.history?.pushState?.({ batteryMonitorPopup: true }, '');
+    this._bodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.body.appendChild(host);
+    this._popup = host;
+    this._view ||= 'room';
+    this._renderPopup();
+  }
+
+  // `fromBack`: the back button already left the history entry the popup added.
+  _closePopup(fromBack = false) {
+    if (!this._popup) return;
+    const host = this._popup;
+    this._popup = null;
+    host.remove();
+    document.removeEventListener('keydown', this._onPopupKey);
+    window.removeEventListener?.('popstate', this._onPopupBack);
+    document.body.style.overflow = this._bodyOverflow || '';
+    if (!fromBack && window.history?.state?.batteryMonitorPopup) window.history.back();
+  }
+
+  _onPopupClick(ev) {
+    const path = ev.composedPath();
+    const el = path.find((n) => n.classList && (n.dataset?.id || n.dataset?.view || n.classList.contains('close') || n.classList.contains('notify')));
+    if (!el) {
+      if (!path.some((n) => n.classList?.contains?.('sheet'))) this._closePopup();
+      return;
+    }
+    if (el.classList.contains('close')) this._closePopup();
+    else if (el.classList.contains('notify')) this._notify();
+    else if (el.dataset.view) {
+      this._view = el.dataset.view;
+      this._renderPopup();
+    } else if (el.dataset.id) this._moreInfo(el.dataset.id);
+  }
+
+  // The batteries in groups: [{ key, name, icon, hint, items: [{ b, context }] }], by room or by type.
+  _groups(view) {
+    const map = new Map();
+    for (const b of this._state.all) {
+      const t = bmTypeOf(this._hass, this._config, b);
+      const key = view === 'room' ? b.area || '' : t?.type || '';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push({ b, context: view === 'room' ? this._typeLabel(t) : [b.area, t?.quantity > 1 ? `×${t.quantity}` : ''].filter(Boolean).join(' · ') });
+    }
+    const groups = [...map.entries()].map(([key, items]) => ({
+      key,
+      items,
+      name: key
+        ? view === 'type' && key === 'rechargeable'
+          ? this._t('rechargeable')
+          : key
+        : this._t(view === 'room' ? 'no_area' : 'unknown_type'),
+      icon: view === 'room' ? 'mdi:door-open' : key ? 'mdi:battery-outline' : 'mdi:battery-unknown',
+      hint: view === 'type' && !key ? this._t('unknown_type_hint') : '',
+    }));
+    // Rooms by name, types by how many batteries use them; the room-less and the unknown last.
+    return groups.sort((a, b) => !a.key - !b.key || (view === 'type' ? b.items.length - a.items.length : 0) || a.name.localeCompare(b.name));
+  }
+
+  // What to buy: the types of the batteries needing attention, with how many of each.
+  _toReplace() {
+    const need = new Map();
+    for (const b of this._state.all.filter((x) => x.low || x.unavailable)) {
+      const t = bmTypeOf(this._hass, this._config, b);
+      const key = t?.type || '';
+      need.set(key, (need.get(key) || 0) + (t?.quantity || 1));
+    }
+    return [...need.entries()]
+      .sort((a, b) => !a[0] - !b[0] || b[1] - a[1])
+      .map(([type, n]) => `<span class="buy${type ? '' : ' unknown'}"><b>${n}×</b> ${bmEsc(type ? this._typeLabel({ type, quantity: 1 }) : this._t('unknown_type'))}</span>`)
+      .join('');
+  }
+
+  _renderPopup() {
+    const host = this._popup;
+    if (!host || !this._state) return;
+    const c = this._config;
+    const s = this._state;
+    const level = this._level();
+    const counts = [
+      s.low.length ? this._t(s.low.length > 1 ? 'low_many' : 'low_one', { n: s.low.length }) : '',
+      s.unavailable.length ? this._t(s.unavailable.length > 1 ? 'unavailable_many' : 'unavailable_one', { n: s.unavailable.length }) : '',
+    ].filter(Boolean);
+    const status = this._status(true, counts, s.all);
+    const view = this._view;
+    const groups = this._groups(view)
+      .map((g) => {
+        const alerts = g.items.filter(({ b }) => b.low || b.unavailable).length;
+        return `
+        <section class="group${alerts ? ' attention' : ''}">
+          <div class="ghead"><ha-icon icon="${g.icon}"></ha-icon><span class="gname">${bmEsc(g.name)}</span>
+            ${alerts ? `<span class="gchip">${bmEsc(this._t('to_check', { n: alerts }))}</span>` : ''}
+            <span class="gcount">${bmEsc(g.items.length > 1 ? this._t('count', { n: g.items.length }) : this._t('count_one'))}</span></div>
+          ${g.hint ? `<div class="ghint">${bmEsc(g.hint)}</div>` : ''}
+          <div class="glist">${g.items.map(({ b, context }) => this._row(b, context)).join('')}</div>
+        </section>`;
       })
       .join('');
-
-    this.shadowRoot.innerHTML = `
-      <style>${BatteryMonitorCard.styles}</style>
-      <ha-card class="lvl-${level}">
-        <div class="head">
-          <div class="badge"><ha-icon icon="${level === 'ok' ? 'mdi:battery-check-outline' : 'mdi:battery-alert-variant-outline'}"></ha-icon></div>
-          <div class="title">${bmEsc(c.title || this._t('title'))}</div>
-          ${
-            c.notify_button && button
-              ? `<button class="notify" title="${bmEsc(this._t('notify_now'))}" aria-label="${bmEsc(this._t('notify_now'))}"><ha-icon icon="mdi:bell-ring-outline"></ha-icon></button>`
-              : ''
-          }
-          <div class="pill">${bmEsc(status)}</div>
-        </div>
-        ${rows ? `<div class="list" style="--cols:${cols}">${rows}</div>` : ''}
-      </ha-card>`;
-
-    this.shadowRoot.querySelector('.notify')?.addEventListener('click', () => {
-      this._hass.callService('button', 'press', { entity_id: button });
-    });
-    for (const el of this.shadowRoot.querySelectorAll('.row')) {
-      el.addEventListener('click', () => {
-        const ev = new Event('hass-more-info', { bubbles: true, composed: true });
-        ev.detail = { entityId: el.dataset.id };
-        this.dispatchEvent(ev);
-      });
-    }
+    const buy = this._toReplace();
+    const tab = (v) =>
+      `<button class="tab${view === v ? ' on' : ''}" data-view="${v}" aria-pressed="${view === v}">${bmEsc(this._t(v === 'room' ? 'by_room' : 'by_type'))}</button>`;
+    const title = bmEsc(c.title || this._t('title'));
+    host.shadowRoot.innerHTML = `
+      <style>${BatteryMonitorCard.styles}${BatteryMonitorCard.popupStyles}</style>
+      <div class="backdrop"><div class="sheet" role="dialog" aria-modal="true" aria-label="${title}">
+        <ha-card class="popup lvl-${level}">
+          <div class="head">
+            <div class="badge"><ha-icon icon="${level === 'ok' ? 'mdi:battery-check-outline' : 'mdi:battery-alert-variant-outline'}"></ha-icon></div>
+            <div class="title">${title}</div>
+            ${this._notifyButton()}
+            <div class="pill">${bmEsc(status)}</div>
+            <button class="close" title="${bmEsc(this._t('popup_close'))}" aria-label="${bmEsc(this._t('popup_close'))}"><ha-icon icon="mdi:close"></ha-icon></button>
+          </div>
+          <div class="bar-top">
+            <div class="tabs" role="group">${tab('room')}${tab('type')}</div>
+            <div class="replace"><span class="rlabel">${bmEsc(this._t('to_replace'))}</span>${buy || `<span class="none">${bmEsc(this._t('nothing_to_replace'))}</span>`}</div>
+          </div>
+          <div class="groups">${groups}</div>
+        </ha-card>
+      </div></div>`;
   }
 
   static get styles() {
@@ -269,6 +527,11 @@ class BatteryMonitorCard extends HTMLElement {
       .notify:hover { background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent); }
       .notify:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
       .notify ha-icon { --mdc-icon-size: 16px; }
+      .full { all: unset; cursor: pointer; flex: none; width: 24px; height: 24px; margin: -4px -4px -4px 0; border-radius: 50%;
+              display: grid; place-items: center; color: var(--secondary-text-color); }
+      .full:hover { background: color-mix(in srgb, var(--secondary-text-color) 14%, transparent); color: var(--primary-text-color); }
+      .full:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+      .full ha-icon { --mdc-icon-size: 16px; }
 
       .list { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
       .row { --t: var(--bm-ok); all: unset; box-sizing: border-box; cursor: pointer; min-width: 0;
@@ -303,10 +566,66 @@ class BatteryMonitorCard extends HTMLElement {
       @media (prefers-reduced-motion: reduce) { .row.alert .ic { animation: none; } }
     `;
   }
+
+  // The full screen layer: opaque over translucent themes, one column on a phone, groups in balanced columns wider.
+  static get popupStyles() {
+    return `
+      :host { all: initial; display: block; font-family: var(--paper-font-body1_-_font-family, var(--ha-font-family-body, Roboto, sans-serif));
+              color: var(--primary-text-color); -webkit-font-smoothing: antialiased; }
+      .backdrop { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.6);
+                  -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); animation: bm-fade .2s ease-out both; }
+      .sheet { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; animation: bm-sheet .28s cubic-bezier(.2,.8,.2,1) both;
+               background: linear-gradient(var(--card-background-color, #fff), var(--card-background-color, #fff)), var(--primary-background-color, #fafafa); }
+      ha-card.popup { --ha-card-border-radius: 0; --ha-card-box-shadow: none; border-radius: 0; box-shadow: none; background: transparent; border: none;
+                      min-height: 100%; box-sizing: border-box; max-width: 1800px; margin: 0 auto; overflow: visible;
+                      padding: 0 max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+      .popup .head { position: sticky; top: 0; z-index: 2; padding: max(10px, env(safe-area-inset-top)) 0 10px;
+                     background: linear-gradient(var(--card-background-color, #fff), var(--card-background-color, #fff)), var(--primary-background-color, #fafafa); }
+      .popup .title { font-size: 18px; }
+      .close { all: unset; cursor: pointer; flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+               background: var(--secondary-background-color, rgba(128,128,128,.12)); color: var(--primary-text-color); }
+      .close:hover { background: color-mix(in srgb, var(--primary-text-color) 14%, transparent); }
+      .close:focus-visible, .tab:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+
+      .bar-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin: 6px 0 16px; }
+      .tabs { display: inline-flex; gap: 4px; padding: 3px; border-radius: 12px; background: var(--secondary-background-color, rgba(128,128,128,.1)); }
+      .tab { all: unset; cursor: pointer; padding: 6px 14px; border-radius: 9px; font-size: 13px; font-weight: 500; color: var(--secondary-text-color); }
+      .tab.on { background: var(--card-background-color, #fff); color: var(--primary-text-color); box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+      .replace { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary-text-color); }
+      .rlabel { font-weight: 500; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+      .buy { padding: 2px 9px; border-radius: 999px; color: var(--primary-text-color);
+             background: color-mix(in srgb, var(--bm-warn) 16%, transparent); }
+      .buy b { color: var(--bm-warn); }
+      .buy.unknown { background: color-mix(in srgb, var(--bm-na) 18%, transparent); }
+      .buy.unknown b { color: var(--secondary-text-color); }
+      .none { color: var(--bm-ok); font-weight: 500; }
+
+      .groups { display: flex; flex-direction: column; gap: 18px; }
+      .group { display: flex; flex-direction: column; gap: 6px; }
+      .ghead { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; color: var(--primary-text-color); }
+      .ghead ha-icon { --mdc-icon-size: 18px; color: var(--secondary-text-color); }
+      .gname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .gchip { font-size: 11px; padding: 1px 8px; border-radius: 999px; color: var(--bm-warn);
+               background: color-mix(in srgb, var(--bm-warn) 14%, transparent); }
+      .gcount { font-size: 11px; font-weight: 400; color: var(--secondary-text-color); }
+      .ghint { font-size: 11px; color: var(--secondary-text-color); margin-top: -2px; }
+      .glist { display: grid; gap: 6px; }
+      @media (min-width: 760px) {
+        ha-card.popup { padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+        .groups { display: block; columns: 2 320px; column-gap: 28px; }
+        .group { break-inside: avoid; margin-bottom: 20px; }
+      }
+      @media (min-width: 1200px) { .groups { columns: 3 320px; } }
+      @media (min-width: 1600px) { .groups { columns: 4 320px; } }
+      @keyframes bm-fade { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes bm-sheet { from { opacity: 0; transform: translateY(24px) } to { opacity: 1; transform: none } }
+      @media (prefers-reduced-motion: reduce) { .backdrop, .sheet { animation: none !important; } }
+    `;
+  }
 }
 
 // ── Editor ───────────────────────────────────────────────────────────────────
-const BM_HELPERS = ['entity', 'title', 'only_low', 'hide_when_ok', 'notify_button', 'language'];
+const BM_HELPERS = ['entity', 'title', 'only_low', 'hide_when_ok', 'notify_button', 'popup', 'language', 'battery_types'];
 
 class BatteryMonitorCardEditor extends HTMLElement {
   setConfig(config) {
@@ -325,7 +644,8 @@ class BatteryMonitorCardEditor extends HTMLElement {
       this._form = document.createElement('ha-form');
       // The language is read at each call: changing the language option translates the labels at once.
       const t = (key) => bmT(bmLang(this._hass, this._config), key);
-      this._form.computeLabel = (s) => t(`ed_${s.name}`);
+      // Inside "Battery types", each field is a battery: labelled with its name and room.
+      this._form.computeLabel = (s) => this._labels?.[s.name] ?? t(`ed_${s.name}`);
       this._form.computeHelper = (s) => (BM_HELPERS.includes(s.name) ? t(`ed_${s.name}_helper`) : undefined);
       this._form.addEventListener('value-changed', (ev) => {
         const config = { ...ev.detail.value };
@@ -333,12 +653,25 @@ class BatteryMonitorCardEditor extends HTMLElement {
         for (const k of Object.keys(config)) {
           if (config[k] === '' || config[k] == null || BM_DEFAULTS[k] === config[k]) delete config[k];
         }
+        if (config.battery_types) {
+          const types = Object.fromEntries(Object.entries(config.battery_types).filter(([, v]) => v && String(v).trim()));
+          if (Object.keys(types).length) config.battery_types = types;
+          else delete config.battery_types;
+        }
         this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
       });
       this.appendChild(this._form);
     }
     this._form.hass = this._hass;
-    this._form.data = { ...BM_DEFAULTS, ...this._config };
+    this._form.data = { ...BM_DEFAULTS, ...this._config, battery_types: { ...(this._config.battery_types || {}) } };
+    // The batteries whose type is not detected, and the ones already set in the card.
+    const entity = this._config.entity || bmPick(this._hass, bmCandidates(this._hass.entities));
+    const batteries = (this._hass.states?.[entity]?.attributes.batteries || []).filter(
+      (b) => this._config.battery_types?.[b.entity_id] || !bmDetectedType(this._hass, b),
+    );
+    this._labels = Object.fromEntries(batteries.map((b) => [b.entity_id, b.area ? `${b.name} · ${b.area}` : b.name]));
+    const lang = bmLang(this._hass, this._config);
+    const typeOptions = BM_TYPES.map((v) => ({ value: v, label: v === 'rechargeable' ? bmT(lang, 'rechargeable') : v }));
     this._form.schema = [
       { name: 'entity', selector: { entity: { filter: { integration: 'battery_monitor', domain: 'sensor' } } } },
       { name: 'title', selector: { text: {} } },
@@ -346,6 +679,7 @@ class BatteryMonitorCardEditor extends HTMLElement {
       { name: 'only_low', selector: { boolean: {} } },
       { name: 'hide_when_ok', selector: { boolean: {} } },
       { name: 'notify_button', selector: { boolean: {} } },
+      { name: 'popup', selector: { boolean: {} } },
       {
         name: 'language',
         selector: {
@@ -358,6 +692,20 @@ class BatteryMonitorCardEditor extends HTMLElement {
           },
         },
       },
+      ...(batteries.length
+        ? [
+            {
+              name: 'battery_types',
+              type: 'expandable',
+              title: bmT(lang, 'ed_battery_types'),
+              icon: 'mdi:battery-outline',
+              schema: batteries.map((b) => ({
+                name: b.entity_id,
+                selector: { select: { mode: 'dropdown', custom_value: true, options: typeOptions } },
+              })),
+            },
+          ]
+        : []),
     ];
   }
 }

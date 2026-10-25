@@ -32,6 +32,7 @@ It comes with a **Lovelace card** listing every battery with its icon, name, roo
 - **Persistent notification**, replaced each time and cleared when no battery is low any more, and the **notify actions** of your choice (mobile app…)
 - **Ignored batteries and integrations**: phones and tablets of the mobile app are left out by default
 - **Lovelace card bundled with the integration**, added automatically to the dashboard resources (nothing to add by hand): icon, name, room, level and how long the battery has been low; red and blinking once notified, orange while low
+- **Full screen view** from the card: every battery grouped **by room** or **by battery type** (CR2032, AA…), with what to buy for the ones to replace; battery types read from [Battery Notes](https://github.com/andrew-codechimp/HA-Battery-Notes) or set in the card editor
 - **Low batteries** sensor with every monitored battery in its attributes, **Last notification** sensor, **Notify now** button and `battery_monitor.notify` action
 - UI setup, no YAML; English and French
 
@@ -124,9 +125,24 @@ type: custom:battery-monitor-card
 | `only_low` | `false` | Show only the batteries below the threshold or unavailable |
 | `hide_when_ok` | `false` | Hide the whole card when every battery is above the threshold and available |
 | `notify_button` | `true` | Bell button in the header that sends the notification now |
+| `popup` | `true` | Full screen button in the header |
+| `battery_types` | — | The type of the batteries Battery Notes doesn't know, by battery entity: `sensor.front_door_battery: CR2032`, `sensor.remote_battery: 2× AAA` |
 | `language` | Auto | Force language: `fr` or `en` |
 
 Tap a battery to open its details.
+
+#### Full screen
+
+The **full screen** button (top right) shows every battery over the whole screen, grouped **by room** or **by battery type**, with **To replace**: how many batteries of each type to buy for the ones low or unavailable. It closes with its button, Escape, a click outside, or the back button on a phone. On a phone the groups follow one another; wider, they sit side by side in balanced columns.
+
+The battery type comes from [Battery Notes](https://github.com/andrew-codechimp/HA-Battery-Notes) when it is installed (the `battery_type` and `battery_quantity` of the battery, or its device's *Battery type* sensor). For the others, the card editor has a **Battery types** section listing every battery whose type is not detected: pick a type (CR2032, CR2450, AA, AAA, 2× AA, 9V, built-in rechargeable…) or type your own. `2× AA` (or `2x AA`, `AA x2`) counts two batteries; the batteries without a type are grouped under **Unknown type**.
+
+```yaml
+type: custom:battery-monitor-card
+battery_types:
+  sensor.front_door_battery: CR2032
+  sensor.remote_battery: 2× AAA
+```
 
 ## Screenshots
 
@@ -134,6 +150,11 @@ Tap a battery to open its details.
 |---|---|
 | ![card](screenshots/card.png) | ![low](screenshots/card-low.png) |
 | ![card dark](screenshots/card-dark.png) | ![low dark](screenshots/card-low-dark.png) |
+
+| Full screen, by room | Full screen, by battery type (French, dark) |
+|---|---|
+| ![full screen by room](screenshots/popup.png) | ![full screen by type](screenshots/popup-dark.png) |
+| ![phone by room](screenshots/popup-phone.png) | ![phone by type](screenshots/popup-phone-type.png) |
 
 ## How it works
 

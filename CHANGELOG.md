@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+### Changes
+- Card: **full screen** button (`popup: false` removes it). Every battery over the whole screen, grouped **by room** or **by battery type**, with **To replace**: how many batteries of each type to buy for the ones low or unavailable. One column on a phone, balanced columns wider; closes with its button, Escape, a click outside or the back button.
+- Card: battery types from Battery Notes (the battery's `battery_type` / `battery_quantity`, or its device's *Battery type* sensor), or set in the card editor's new **Battery types** section for the batteries whose type is not detected (`battery_types` in YAML). `2× AA` counts two batteries.
+
 ## 1.4.0
 
 ### Changes
