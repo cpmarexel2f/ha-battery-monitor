@@ -4,7 +4,7 @@
  * Served and added to the dashboard resources by the integration.
  * https://github.com/juju35/ha-battery-monitor
  */
-var BATTERY_MONITOR_CARD_VERSION = '1.5.0';
+var BATTERY_MONITOR_CARD_VERSION = '1.5.1';
 
 const BM_I18N = {
   en: {
@@ -284,7 +284,10 @@ class BatteryMonitorCard extends HTMLElement {
     const status = this._status(st, counts, all);
     const cols = Math.min(3, Math.max(1, Number(c.columns) || 1));
 
-    const rows = shown.map((b) => this._row(b, b.area)).join('');
+    // The room and the battery type (CR2032, 2× AA…) under each name, when known.
+    const rows = shown
+      .map((b) => this._row(b, [b.area, this._typeLabel(bmTypeOf(this._hass, c, b))].filter(Boolean).join(' · ')))
+      .join('');
 
     this.shadowRoot.innerHTML = `
       <style>${BatteryMonitorCard.styles}</style>

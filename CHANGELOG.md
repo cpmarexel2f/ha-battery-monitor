@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+
+### Changes
+- Card: the battery type (CR2032, AAA ×2…) is shown under each battery's name, next to its room, in the card's list too.
+
 ## 1.5.0
 
 ### Changes

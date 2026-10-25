@@ -305,3 +305,14 @@ test('editor: empty battery types are not written to the YAML', () => {
   editor._form.dispatch({ battery_types: { 'sensor.remote_battery': '2× AAA', 'sensor.leak_battery': '' }, popup: true });
   assert.deepEqual(JSON.parse(JSON.stringify(config)), { battery_types: { 'sensor.remote_battery': '2× AAA' } });
 });
+
+test('the list shows each battery type next to its room', () => {
+  const card = makeCard({ battery_types: { 'sensor.remote_battery': '2× AAA' } });
+  card.hass = typedHass();
+  const out = html(card);
+  assert.match(out, /class="name">Door<\/span>\s*<span class="sub">Entrance · CR2032<\/span>/);
+  assert.match(out, /class="name">Lock<\/span>\s*<span class="sub">Entrance · AA ×4<\/span>/);
+  assert.match(out, /class="name">Remote<\/span>\s*<span class="sub">Living room · AAA ×2<\/span>/);
+  // No room and no type: nothing under the name.
+  assert.match(out, /class="name">Leak<\/span>\s*<\/span>/);
+});
