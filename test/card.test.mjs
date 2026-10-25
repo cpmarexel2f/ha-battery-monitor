@@ -216,6 +216,11 @@ const typedHass = (lang = 'en') => ({
     'sensor.door_battery': { state: '12', attributes: { battery_type: 'CR2032', battery_quantity: 1 } },
     'sensor.lock_battery_type': { state: 'AA', attributes: { battery_quantity: 4 } },
   },
+  devices: {
+    dev_door: { model: 'Door sensor', manufacturer: 'Acme' },
+    dev_remote: { model: 'Remote control', manufacturer: 'Acme' },
+    dev_leak: { model: 'Leak sensor', manufacturer: 'Acme' },
+  },
   language: lang,
   locale: { language: lang },
   callService() {},
@@ -286,7 +291,7 @@ test('editor: a type field for each battery whose type is not detected, labelled
   editor.hass = typedHass('fr');
   const group = editor._form.schema.find((s) => s.name === 'battery_types');
   assert.equal(group.type, 'expandable');
-  assert.equal(group.title, 'Types de pile');
+  assert.equal(group.title, 'Types de pile par batterie');
   // The door is set in the card, the lock detected (left out), the remote and the leak sensor to set.
   assert.deepEqual(
     group.schema.map((s) => s.name),
@@ -317,4 +322,42 @@ test('the list shows each battery type next to its room', () => {
   assert.match(out, /class="name">Remote<\/span>\s*<span class="sub">Living room · 2× AAA<\/span>/);
   // No room and no type: nothing under the name.
   assert.match(out, /class="name">Leak<\/span>\s*<\/span>/);
+});
+
+test('battery types by model: every device of the model, a battery setting still wins', () => {
+  const hass = typedHass();
+  const config = { battery_models: { 'Remote control': '2× AAA', 'Leak sensor': 'CR2032', 'Door sensor': 'CR2450' } };
+  assert.equal(bmTypeOf(hass, config, ROOMS[2]).type, 'AAA');
+  assert.equal(bmTypeOf(hass, config, ROOMS[2]).quantity, 2);
+  assert.equal(bmTypeOf(hass, config, ROOMS[3]).type, 'CR2032');
+  // The model wins over Battery Notes (the door's CR2032), the battery setting over the model.
+  assert.equal(bmTypeOf(hass, config, ROOMS[0]).type, 'CR2450');
+  assert.equal(bmTypeOf(hass, { ...config, battery_types: { 'sensor.remote_battery': 'AA' } }, ROOMS[2]).type, 'AA');
+  // The lock has no model: Battery Notes' type stays.
+  assert.equal(bmTypeOf(hass, config, ROOMS[1]).type, 'AA');
+});
+
+test('editor: a type field for each model, the batteries left without a type below', () => {
+  const editor = new BatteryMonitorCardEditor();
+  editor.appendChild = () => {};
+  let config;
+  editor.dispatchEvent = (ev) => (config = ev.detail.config);
+  editor.setConfig({ battery_models: { 'Remote control': '2× AAA' } });
+  editor.hass = typedHass('fr');
+  const byModel = editor._form.schema.find((s) => s.name === 'battery_models');
+  const byBattery = editor._form.schema.find((s) => s.name === 'battery_types');
+  assert.equal(byModel.title, 'Types de pile par modèle');
+  // The door is detected (Battery Notes): its model is left out; the remote's model is set, the leak's to set.
+  assert.deepEqual(
+    [...byModel.schema.map((s) => s.name)],
+    ['Leak sensor', 'Remote control'],
+  );
+  assert.equal(editor._form.computeLabel({ name: 'Remote control' }), 'Remote control · Acme · 1 appareil');
+  // By battery: only the leak sensor, whose model has no type yet.
+  assert.deepEqual(
+    [...byBattery.schema.map((s) => s.name)],
+    ['sensor.leak_battery'],
+  );
+  editor._form.dispatch({ battery_models: { 'Remote control': '2× AAA', 'Leak sensor': 'CR2032' }, battery_types: {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(config)), { battery_models: { 'Remote control': '2× AAA', 'Leak sensor': 'CR2032' } });
 });

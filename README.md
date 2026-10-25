@@ -126,7 +126,8 @@ type: custom:battery-monitor-card
 | `hide_when_ok` | `false` | Hide the whole card when every battery is above the threshold and available |
 | `notify_button` | `true` | Bell button in the header that sends the notification now |
 | `popup` | `true` | Full screen button in the header |
-| `battery_types` | — | The type of the batteries Battery Notes doesn't know, by battery entity: `sensor.front_door_battery: CR2032`, `sensor.remote_battery: 2× AAA` |
+| `battery_models` | — | The battery type of every device of a model Battery Notes doesn't know: `Hue dimmer switch: CR2450`, `Radiator Thermostat W600: 2× AA` |
+| `battery_types` | — | The type of one battery, by battery entity, for one without a model or that differs from its model: `sensor.remote_battery: 2× AAA` |
 | `language` | Auto | Force language: `fr` or `en` |
 
 Tap a battery to open its details.
@@ -135,12 +136,15 @@ Tap a battery to open its details.
 
 The **full screen** button (top right) shows every battery over the whole screen, grouped **by room** or **by battery type**, with **To replace**: how many batteries of each type to buy for the ones low or unavailable. It closes with its button, Escape, a click outside, or the back button on a phone. On a phone the groups follow one another; wider, they sit side by side in balanced columns.
 
-The battery type comes from [Battery Notes](https://github.com/andrew-codechimp/HA-Battery-Notes) when it is installed (the `battery_type` and `battery_quantity` of the battery, or its device's *Battery type* sensor). For the others, the card editor has a **Battery types** section listing every battery whose type is not detected: pick a type (CR2032, CR2450, AA, AAA, 2× AA, 9V, built-in rechargeable…) or type your own. `2× AA` (or `2x AA`, `AA x2`) counts two batteries; the batteries without a type are grouped under **Unknown type**.
+The battery type comes from [Battery Notes](https://github.com/andrew-codechimp/HA-Battery-Notes) when it is installed (the `battery_type` and `battery_quantity` of the battery, or its device's *Battery type* sensor). For the others, set it once per **device model**: the card editor's **Battery types by model** section lists the models (with their manufacturer and how many devices) whose type is not detected; pick a type (CR2032, CR2450, AA, AAA, 2× AA, 9V, built-in rechargeable…) or type your own. A battery without a model, or one that differs from its model, gets its own type in **Battery types by battery**, which wins over its model. `2× AA` (or `2x AA`, `AA x2`) counts two batteries; the batteries without a type are grouped under **Unknown type**. The order: the battery's own type, then its model's, then Battery Notes.
 
 ```yaml
 type: custom:battery-monitor-card
+battery_models:
+  Hue dimmer switch: CR2450
+  MYGGBETT door/window sensor: AAA
+  Radiator Thermostat W600: 2× AA
 battery_types:
-  sensor.front_door_battery: CR2032
   sensor.remote_battery: 2× AAA
 ```
 

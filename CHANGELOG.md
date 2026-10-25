@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0
+
+### Changes
+- Card: battery types **by device model** (`battery_models`): one type for every device of a model, e.g. `Hue dimmer switch: CR2450`. The editor's new **Battery types by model** section lists the models whose type is not detected, with their manufacturer and how many devices; **Battery types by battery** (`battery_types`) now only lists the batteries left without a type, and a battery's own type still wins over its model's.
+
 ## 1.5.2
 
 ### Changes

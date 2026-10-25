@@ -4,7 +4,7 @@
  * Served and added to the dashboard resources by the integration.
  * https://github.com/juju35/ha-battery-monitor
  */
-var BATTERY_MONITOR_CARD_VERSION = '1.5.2';
+var BATTERY_MONITOR_CARD_VERSION = '1.6.0';
 
 const BM_I18N = {
   en: {
@@ -38,9 +38,13 @@ const BM_I18N = {
     ed_language_helper: 'Leave empty to follow Home Assistant',
     ed_popup: 'Full screen button',
     ed_popup_helper: 'Opens every battery over the whole screen, by room or by battery type',
-    ed_battery_types: 'Battery types',
-    ed_battery_types_helper:
-      'The batteries whose type is not detected (Battery Notes): pick it or type it, e.g. CR2032, 2× AA',
+    ed_battery_models: 'Battery types by model',
+    ed_battery_models_helper:
+      'One type for every device of a model whose type is not detected (Battery Notes): pick it or type it, e.g. CR2450, 2× AA',
+    ed_battery_types: 'Battery types by battery',
+    ed_battery_types_helper: 'For a battery without a model, or one that differs from its model',
+    devices_n: '{n} devices',
+    devices_one: '1 device',
     popup_open: 'Full screen',
     popup_close: 'Close',
     by_room: 'By room',
@@ -88,9 +92,13 @@ const BM_I18N = {
     ed_language_helper: 'Laisser vide pour suivre Home Assistant',
     ed_popup: 'Bouton plein écran',
     ed_popup_helper: 'Affiche toutes les batteries sur tout l’écran, par pièce ou par type de pile',
-    ed_battery_types: 'Types de pile',
-    ed_battery_types_helper:
-      'Les batteries dont le type n’est pas détecté (Battery Notes) : le choisir ou le saisir, ex. CR2032, 2× AA',
+    ed_battery_models: 'Types de pile par modèle',
+    ed_battery_models_helper:
+      'Un type pour tous les appareils d’un modèle dont le type n’est pas détecté (Battery Notes) : le choisir ou le saisir, ex. CR2450, 2× AA',
+    ed_battery_types: 'Types de pile par batterie',
+    ed_battery_types_helper: 'Pour une batterie sans modèle, ou qui diffère de son modèle',
+    devices_n: '{n} appareils',
+    devices_one: '1 appareil',
     popup_open: 'Plein écran',
     popup_close: 'Fermer',
     by_room: 'Par pièce',
@@ -166,8 +174,12 @@ function bmDetectedType(hass, b) {
   return sensor ? bmParseType(sensor.state, sensor.attributes?.battery_quantity) : null;
 }
 
+// The model of a battery's device ("Hue dimmer switch", "MYGGBETT door/window sensor"), from the device registry.
+const bmModelOf = (hass, b) => String(hass?.devices?.[b.device_id]?.model || '').trim();
+
+// The type of a battery: set for this battery in the card, else set for its model, else detected.
 const bmTypeOf = (hass, config, b) => {
-  const set = config?.battery_types?.[b.entity_id];
+  const set = config?.battery_types?.[b.entity_id] || config?.battery_models?.[bmModelOf(hass, b)];
   return set ? bmParseType(set) : bmDetectedType(hass, b);
 };
 
@@ -642,7 +654,13 @@ class BatteryMonitorCard extends HTMLElement {
 }
 
 // ── Editor ───────────────────────────────────────────────────────────────────
-const BM_HELPERS = ['entity', 'title', 'only_low', 'hide_when_ok', 'notify_button', 'popup', 'language', 'battery_types'];
+const BM_HELPERS = ['entity', 'title', 'only_low', 'hide_when_ok', 'notify_button', 'popup', 'language', 'battery_models', 'battery_types'];
+
+// A map of the editor (battery types by battery or by model) without its empty entries, or undefined when empty.
+const bmCleanMap = (map) => {
+  const out = Object.fromEntries(Object.entries(map || {}).filter(([, v]) => v && String(v).trim()));
+  return Object.keys(out).length ? out : undefined;
+};
 
 class BatteryMonitorCardEditor extends HTMLElement {
   setConfig(config) {
@@ -670,24 +688,49 @@ class BatteryMonitorCardEditor extends HTMLElement {
         for (const k of Object.keys(config)) {
           if (config[k] === '' || config[k] == null || BM_DEFAULTS[k] === config[k]) delete config[k];
         }
-        if (config.battery_types) {
-          const types = Object.fromEntries(Object.entries(config.battery_types).filter(([, v]) => v && String(v).trim()));
-          if (Object.keys(types).length) config.battery_types = types;
-          else delete config.battery_types;
+        for (const key of ['battery_models', 'battery_types']) {
+          const map = bmCleanMap(config[key]);
+          if (map) config[key] = map;
+          else delete config[key];
         }
         this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
       });
       this.appendChild(this._form);
     }
     this._form.hass = this._hass;
-    this._form.data = { ...BM_DEFAULTS, ...this._config, battery_types: { ...(this._config.battery_types || {}) } };
-    // The batteries whose type is not detected, and the ones already set in the card.
-    const entity = this._config.entity || bmPick(this._hass, bmCandidates(this._hass.entities));
-    const batteries = (this._hass.states?.[entity]?.attributes.batteries || []).filter(
-      (b) => this._config.battery_types?.[b.entity_id] || !bmDetectedType(this._hass, b),
+    const c = this._config;
+    this._form.data = {
+      ...BM_DEFAULTS,
+      ...c,
+      battery_models: { ...(c.battery_models || {}) },
+      battery_types: { ...(c.battery_types || {}) },
+    };
+    const lang = bmLang(this._hass, c);
+    const entity = c.entity || bmPick(this._hass, bmCandidates(this._hass.entities));
+    const all = this._hass.states?.[entity]?.attributes.batteries || [];
+    // By model: the models of the batteries whose type is not detected (and the ones already set), with their
+    // manufacturer and how many devices; by battery: the ones left without a type, and the ones already set.
+    const undetected = all.filter((b) => !bmDetectedType(this._hass, b));
+    const models = new Map();
+    for (const b of all) {
+      const model = bmModelOf(this._hass, b);
+      if (!model || (!c.battery_models?.[model] && !undetected.includes(b))) continue;
+      const m = models.get(model) || { n: 0, maker: this._hass.devices?.[b.device_id]?.manufacturer || '' };
+      m.n += 1;
+      models.set(model, m);
+    }
+    const batteries = all.filter(
+      (b) => c.battery_types?.[b.entity_id] || (undetected.includes(b) && !c.battery_models?.[bmModelOf(this._hass, b)]),
     );
-    this._labels = Object.fromEntries(batteries.map((b) => [b.entity_id, b.area ? `${b.name} · ${b.area}` : b.name]));
-    const lang = bmLang(this._hass, this._config);
+    this._labels = {
+      ...Object.fromEntries(
+        [...models].map(([model, m]) => [
+          model,
+          [model, m.maker, bmT(lang, m.n > 1 ? 'devices_n' : 'devices_one', { n: m.n })].filter(Boolean).join(' · '),
+        ]),
+      ),
+      ...Object.fromEntries(batteries.map((b) => [b.entity_id, b.area ? `${b.name} · ${b.area}` : b.name])),
+    };
     const typeOptions = BM_TYPES.map((v) => ({ value: v, label: v === 'rechargeable' ? bmT(lang, 'rechargeable') : v }));
     this._form.schema = [
       { name: 'entity', selector: { entity: { filter: { integration: 'battery_monitor', domain: 'sensor' } } } },
@@ -709,22 +752,17 @@ class BatteryMonitorCardEditor extends HTMLElement {
           },
         },
       },
-      ...(batteries.length
-        ? [
-            {
-              name: 'battery_types',
-              type: 'expandable',
-              title: bmT(lang, 'ed_battery_types'),
-              icon: 'mdi:battery-outline',
-              schema: batteries.map((b) => ({
-                name: b.entity_id,
-                selector: { select: { mode: 'dropdown', custom_value: true, options: typeOptions } },
-              })),
-            },
-          ]
-        : []),
+      ...bmTypeSection('battery_models', 'mdi:devices', [...models.keys()].sort(), typeOptions, lang),
+      ...bmTypeSection('battery_types', 'mdi:battery-outline', batteries.map((b) => b.entity_id), typeOptions, lang),
     ];
   }
+}
+
+// A folded editor section with a type field for each of `names` (models or battery entities), none when empty.
+function bmTypeSection(name, icon, names, options, lang) {
+  if (!names.length) return [];
+  const selector = { select: { mode: 'dropdown', custom_value: true, options } };
+  return [{ name, type: 'expandable', title: bmT(lang, `ed_${name}`), icon, schema: names.map((n) => ({ name: n, selector })) }];
 }
 
 if (!customElements.get('battery-monitor-card')) {
