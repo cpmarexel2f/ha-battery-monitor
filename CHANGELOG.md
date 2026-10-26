@@ -1,7 +1,6 @@
 # Changelog
 
-## Unreleased
-
+## 1.7.0
 ### Changes
 - Card header: the status badge is 40 px with a 24 px icon (was 36 px / 20 px), like the other ha-* cards; same in the full screen view.
 - Card: only the batteries needing attention are tinted (12 % of the warning colour when low, of the error colour when unavailable or notified, without border); the batteries that are fine use the neutral tile, keeping their green on the icon and the level bar. An unavailable battery is shown in the error colour right away (it was orange until notified); only notified batteries blink. Same in the full screen view.
