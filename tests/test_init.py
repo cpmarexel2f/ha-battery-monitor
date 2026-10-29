@@ -33,6 +33,7 @@ from custom_components.battery_monitor.const import (
     DOMAIN,
     NOTIFICATION_ID,
 )
+from custom_components.battery_monitor.monitor import REFRESH_COOLDOWN
 
 from .conftest import add_battery
 
@@ -56,6 +57,13 @@ async def _setup(hass: HomeAssistant, **options) -> MockConfigEntry:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     return entry
+
+
+async def _settle(hass: HomeAssistant) -> None:
+    """Let the coalesced refresh of the battery changes run (past the debouncer cooldown)."""
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=REFRESH_COOLDOWN + 1))
+    await hass.async_block_till_done()
 
 
 def _resources(hass: HomeAssistant):
@@ -229,8 +237,25 @@ async def test_storage_written_only_when_times_change(hass: HomeAssistant) -> No
         save.assert_not_called()
 
         hass.states.async_set(door, "10", attributes)
-        await hass.async_block_till_done()
+        await _settle(hass)
         save.assert_called()
+
+
+async def test_battery_changes_coalesced(hass: HomeAssistant) -> None:
+    """A burst of battery changes refreshes the list once right away and once after the cooldown, not per change."""
+    door = add_battery(hass, "Door", "80")
+    entry = await _setup(hass)
+    monitor = entry.runtime_data
+    attributes = hass.states.get(door).attributes
+
+    with patch.object(monitor, "_notify_listeners", wraps=monitor._notify_listeners) as refreshed:
+        for level in range(79, 59, -1):
+            hass.states.async_set(door, str(level), attributes)
+        await hass.async_block_till_done()
+        assert refreshed.call_count == 1
+        await _settle(hass)
+        assert refreshed.call_count == 2
+    assert _batteries(hass)[0]["level"] == 60
 
 
 async def test_button_and_action(hass: HomeAssistant) -> None:
@@ -285,7 +310,7 @@ async def test_stored_low_since_kept_while_starting(hass: HomeAssistant, hass_st
     # Once running, the entries of the batteries that are gone for good are pruned
     hass.set_state(CoreState.running)
     hass.states.async_set(door, "11", {"device_class": "battery", "unit_of_measurement": "%"})
-    await hass.async_block_till_done()
+    await _settle(hass)
     monitor = hass.config_entries.async_entries(DOMAIN)[0].runtime_data
     assert set(monitor._below_since) == {door}
     assert _batteries(hass)[0]["below_since"] == stored.isoformat()
@@ -303,7 +328,7 @@ async def test_unavailable_keeps_low_since(hass: HomeAssistant, freezer: FrozenD
 
     freezer.tick(timedelta(hours=2))
     hass.states.async_set(door, "9", {"device_class": "battery", "unit_of_measurement": "%"})
-    await hass.async_block_till_done()
+    await _settle(hass)
     battery = _batteries(hass)[0]
     assert battery["below_since"] == since and battery["due"]
 
@@ -460,6 +485,28 @@ async def test_registry_changes_refresh_the_list(hass: HomeAssistant) -> None:
     entities.async_update_entity(door, area_id=area.id, name="Door battery")
     await hass.async_block_till_done()
     assert _batteries(hass)[0]["area"] == "Hall"
+
+
+async def test_remove_drops_stored_low_since(hass: HomeAssistant, hass_storage: dict) -> None:
+    """Removing the entry deletes the stored times: a reinstall starts every count afresh."""
+    from custom_components.battery_monitor.const import STORAGE_KEY
+
+    add_battery(hass, "Door", "10")
+    entry = await _setup(hass)
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert STORAGE_KEY not in hass_storage
+
+
+async def test_action_when_not_loaded(hass: HomeAssistant) -> None:
+    """The notify action raises a translated error when the entry is not loaded."""
+    from homeassistant.exceptions import ServiceValidationError
+
+    entry = await _setup(hass)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(DOMAIN, "notify", {}, blocking=True)
+    assert err.value.translation_domain == DOMAIN and err.value.translation_key == "not_loaded"
 
 
 async def test_card_resource_back_after_remove_and_add(hass: HomeAssistant) -> None:
